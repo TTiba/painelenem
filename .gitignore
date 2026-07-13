@@ -1,0 +1,24 @@
+# Dados brutos e SQLite (gerados pelo pipeline)
+data/
+
+# Variante SP (não modificar por enquanto)
+sp/
+sp_deploy/
+
+# Deck / apresentação
+deck/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Editores
+.vscode/
+.idea/
+*.swp

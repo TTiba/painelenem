@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel ENEM 2025 · Wayground</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400..1000&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap topbar-in">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span class="brand-name">Painel ENEM <b>2025</b></span>
+    </div>
+    <div class="topbar-links">
+      <a href="mapa.html">Mapa</a>
+      <a href="entenda.html">Entenda os dados</a>
+      <span class="brand-by">um produto <b>Wayground</b></span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- Seletor Estado > Município > Escola -->
+  <section class="card selector">
+    <h1>O que a sua escola ensinou este ano?</h1>
+    <p class="sub">Explore o desempenho no ENEM 2025 por estado, município e escola —
+       redação, áreas do conhecimento e cada item da prova.</p>
+    <div class="tabs tabs-rede" id="tabs-rede">
+      <button data-rede="T" class="on">Todas as redes</button>
+      <button data-rede="PUB">Públicas</button>
+      <button data-rede="PRIV">Privadas</button>
+    </div>
+    <div class="selects">
+      <label>Estado
+        <select id="sel-uf"><option value="">Brasil (todos)</option></select>
+      </label>
+      <label>Município
+        <select id="sel-mun" disabled><option value="">—</option></select>
+      </label>
+      <label>Escola
+        <span class="combo">
+          <input id="inp-esc" type="text" autocomplete="off" disabled
+                 placeholder="Digite para buscar…">
+          <div id="combo-list" class="combo-list" hidden></div>
+        </span>
+      </label>
+      <button id="btn-limpar" class="btn-ghost" type="button">Limpar</button>
+    </div>
+  </section>
+
+  <!-- Cabeçalho da entidade -->
+  <section id="entidade" class="entidade">
+    <div>
+      <h2 id="ent-nome">Brasil</h2>
+      <div id="ent-meta" class="meta"></div>
+    </div>
+    <div id="ent-chip" class="chip-nivel">Brasil</div>
+  </section>
+
+  <!-- KPIs -->
+  <section id="kpis" class="kpis"></section>
+
+  <div class="duo">
+    <!-- Redação: competências -->
+    <section class="card">
+      <div class="card-head">
+        <h3>Redação · competências</h3>
+        <span class="hint">média de 0 a 200 por competência</span>
+      </div>
+      <div id="comps"></div>
+    </section>
+
+    <!-- Comparação por área -->
+    <section class="card">
+      <div class="card-head">
+        <h3>Comparação por área</h3>
+        <span class="hint">médias na escala ENEM</span>
+      </div>
+      <div id="areas-comp"></div>
+    </section>
+  </div>
+
+  <!-- Itens -->
+  <section class="card">
+    <div class="card-head">
+      <h3>Desempenho por item</h3>
+      <span class="hint">barra = % de acerto observado · traço escuro ▍= esperado pela TRI
+        para o nível dos alunos desta seleção</span>
+    </div>
+    <div class="tabs" id="tabs-area">
+      <button data-area="LC">Linguagens</button>
+      <button data-area="CH">Humanas</button>
+      <button data-area="CN">Natureza</button>
+      <button data-area="MT" class="on">Matemática</button>
+    </div>
+    <div class="tbl-scroll">
+      <table class="tbl" id="tbl-itens">
+        <thead><tr>
+          <th>Item</th><th>Habilidade</th><th>Dificuldade (b)</th>
+          <th class="col-bar">% acerto</th><th>UF</th><th>Brasil</th><th>Δ Brasil</th>
+          <th title="Diferença entre o acerto observado e o esperado pela TRI dado o nível dos alunos desta seleção">Δ esperado</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="foot-note">Habilidades exibidas conforme a matriz de referência do INEP (H1–H30 por área).
+       Quando o mapa próprio de habilidades por item for carregado, ele substitui esta coluna.</p>
+  </section>
+
+  <footer class="rodape">
+    Fonte: Microdados ENEM 2025 (INEP). Apenas concluintes com escola identificada.
+    Células com poucos participantes devem ser lidas com cautela.
+  </footer>
+</main>
+
+<script src="habilidades.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
