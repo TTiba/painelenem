@@ -172,10 +172,35 @@
       </div>
     </section>
 
+    <section class="info-card">
+      <div class="info-band" style="background:var(--lilac)">Comparações entre anos (2021 – 2025)</div>
+      <div class="info-body">
+        <p><b>Janela de tempo:</b> o painel usa cinco edições do ENEM (2021 a 2025).
+        A escala de notas e os parâmetros TRI dos itens são calibrados pelo próprio
+        INEP para serem <i>comparáveis entre anos</i> — 520 em 2022 e 520 em 2025
+        querem dizer essencialmente a mesma coisa em termos de proficiência.</p>
+        <p><b>Concluintes:</b> o filtro é o mesmo em todos os anos — quem concluiu o
+        ensino médio e tem escola identificável. Isso mantém a comparação limpa.</p>
+        <p><b>Escolas antes de 2024:</b> até o ENEM 2023 o INEP <i>não expunha</i> o
+        código INEP da escola nos microdados (apenas se era pública ou privada). Por
+        isso o drill-down por escola só cobre 2024 e 2025 — a UI mostra um aviso
+        explícito quando esse limite é atingido.</p>
+        <p><b>2021 · pandemia:</b> a prova foi aplicada em janeiro de 2022 com cerca
+        de <b>1 milhão de concluintes</b>, contra os ~2,7 M típicos. O painel mantém
+        o ano na série (para não abrir buracos), mas marca esse ponto com um badge
+        de atenção (⚠). Leia esse ano com contexto — não é uma medida "normal" da
+        educação brasileira.</p>
+        <p><b>Habilidades:</b> a Matriz de Referência do ENEM é a mesma desde 2009
+        (H1–H30 em quatro áreas), então a comparação de <i>cobertura</i> e
+        <i>desempenho</i> por habilidade entre anos é direta. A página
+        <a href="criticas.html">Críticas</a> reúne esse cruzamento em tabela.</p>
+      </div>
+    </section>
+
   </div>
 
   <footer class="rodape">
-    Fontes: Microdados ENEM 2025, Matriz de Referência e parâmetros TRI dos itens — INEP.
+    Fontes: Microdados ENEM 2021 – 2025, Matriz de Referência e parâmetros TRI dos itens — INEP.
     Percentuais de acerto e Δs calculados pela plataforma a partir das respostas item a item.
   </footer>
 </main>

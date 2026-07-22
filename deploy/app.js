@@ -1,4 +1,4 @@
-/* Painel ENEM 2025 — Wayground ------------------------------------------- */
+/* Painel ENEM 2021–2025 — Wayground -------------------------------------- */
 
 const AREA_INFO = {
   RED: { nome: "Redação",     cor: "var(--rose)"  },
@@ -8,14 +8,51 @@ const AREA_INFO = {
   MT:  { nome: "Matemática",  cor: "var(--lime)"  },
 };
 const NIVEL_NOME = { BR: "Brasil", UF: "Estado", MUN: "Município", ESC: "Escola" };
+const ANOS = [2021, 2022, 2023, 2024, 2025];
+const ANO_LATEST = 2025;
 
 const $ = (s) => document.querySelector(s);
 const fmt = (v, d = 1) =>
   v == null ? "–" : Number(v).toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d });
 const fmtInt = (v) => (v == null ? "–" : Number(v).toLocaleString("pt-BR"));
 
-const state = { uf: "", mun: "", esc: "", area: "MT", rede: "T" };
+const state = {
+  uf: "", mun: "", esc: "", area: "MT", rede: "T", ano: ANO_LATEST,
+  comp_modo: "atual",   // "atual" | "evolucao"
+  comp_filtro: null,    // número da competência ativa como filtro da tabela (1..9)
+};
 const REDE_NOME = { T: "todas as redes", PUB: "rede pública", PRIV: "rede privada" };
+
+/* -------- Sincronização state ↔ URL ↔ localStorage -------------------------
+ * Filtros globais (uf/mun/esc/rede) usam Filtros.carregar/salvar pra persistir
+ * entre páginas via localStorage. Preferências locais (area/ano) ficam só na URL. */
+function readStateFromURL() {
+  const globais = window.Filtros ? window.Filtros.carregar() : {};
+  state.uf   = globais.uf   || state.uf;
+  state.mun  = globais.mun  || state.mun;
+  state.esc  = globais.esc  || state.esc;
+  state.rede = globais.rede || state.rede;
+  const p = new URLSearchParams(location.search);
+  if (p.get("area") && ["LC","CH","CN","MT"].includes(p.get("area"))) state.area = p.get("area");
+  if (p.get("ano")) {
+    const a = parseInt(p.get("ano"), 10);
+    if (ANOS.includes(a)) state.ano = a;
+  }
+}
+function writeStateToURL() {
+  const p = new URLSearchParams();
+  if (state.uf)   p.set("uf", state.uf);
+  if (state.mun)  p.set("mun", state.mun);
+  if (state.esc)  p.set("esc", state.esc);
+  if (state.rede !== "T")  p.set("rede", state.rede);
+  if (state.area !== "MT") p.set("area", state.area);
+  if (state.ano !== ANO_LATEST) p.set("ano", state.ano);
+  const qs = p.toString();
+  history.replaceState(null, "", qs ? "?" + qs : location.pathname);
+  if (window.Filtros) window.Filtros.salvar({
+    uf: state.uf, mun: state.mun, esc: state.esc, rede: state.rede,
+  });
+}
 
 function nivelChave() {
   if (state.esc) return { nivel: "ESC", chave: state.esc };
@@ -24,12 +61,11 @@ function nivelChave() {
   return { nivel: "BR", chave: "BR" };
 }
 
-/* Em produção (Netlify) o site é estático: as respostas da API são arquivos
-   JSON pré-gerados por pipeline/exporta_netlify.py (window.API_STATIC = 1).
-   Listas e entidades BR/UF/MUN têm ramos por rede (T/PUB/PRIV); as referências
-   por item (UF/BR) vivem em api/refs/{chave}.json e são juntadas aqui. */
+/* Estático: JSONs pré-gerados por pipeline/exporta_netlify.py. */
 const cacheEntidade = {};
+const cacheHistorico = {};
 const cacheRefs = {};
+let historicoBrCache = null;
 
 async function api(rota, params = {}) {
   const rede = state.rede || "T";
@@ -58,26 +94,76 @@ async function api(rota, params = {}) {
 
   if (rota === "resumo") {
     if (ehEscola) {
-      return { alvo: ent.resumo.alvo,
-               contexto: ent.resumo.contexto_por_rede?.[rede] || [] };
+      return {
+        alvo: ent.resumo.alvo,
+        contexto: ent.resumo.contexto_por_rede?.[rede] || [],
+        hist_resumo: ent.hist_resumo || [],
+        hist_scope: ent.hist_scope || null,
+      };
     }
-    return ramo.resumo;
+    return {
+      ...ramo.resumo,
+      hist_resumo: ramo.hist_resumo || [],
+    };
   }
   if (rota === "itens") {
+    const ano = params.ano || ANO_LATEST;
     const alvo = ehEscola ? ent.resumo.alvo : ramo.resumo.alvo;
     const uf = alvo.uf || alvo.escola?.uf || null;
-    const refsDe = async (chave) => {
-      if (!cacheRefs[chave]) cacheRefs[chave] = j(`api/refs/${chave}.json`);
+
+    if (ano === ANO_LATEST) {
+      // caminho rápido — ano corrente já vem em ent
+      const refsDe = async (chave) => {
+        if (!cacheRefs[chave]) cacheRefs[chave] = j(`api/refs/${chave}.json`);
+        return (await cacheRefs[chave])?.[rede] || {};
+      };
+      const [ru, rb] = await Promise.all(
+        [uf ? refsDe(uf) : {}, refsDe("BR")]);
+      const brutos = ehEscola ? ent.itens : ramo.itens;
+      return (brutos[params.area] || []).map(
+        ([item, n, p, p_esp, hab, b, lingua]) => ({
+          item, n, p, p_esp, habilidade_inep: hab, param_b: b,
+          tp_lingua: lingua,
+          p_uf: ru[item] ?? null, p_br: rb[item] ?? null,
+        }));
+    }
+
+    // outro ano → historico/{nivel}/{chave}.json + refs_hist/{ano}/…
+    if (ehEscola) return [];    // escola: histórico item-a-item não emitido
+    if (!cacheHistorico[k]) {
+      cacheHistorico[k] = j(`api/historico/${k}.json`);
+    }
+    const hist = await cacheHistorico[k];
+    if (!hist || !hist[rede]) return [];
+    const bloco = hist[rede];
+    const rows = (bloco.por_ano?.[ano]?.[params.area]) || [];
+    // refs históricos vêm de api/refs_hist/{ano}/{BR|UF/uf}.json (por rede)
+    const refKey = (ch) => `${ano}/${ch}`;
+    const refsDeAno = async (isBr) => {
+      const path = isBr
+        ? `api/refs_hist/${ano}/BR.json`
+        : `api/refs_hist/${ano}/UF/${uf}.json`;
+      const chave = isBr ? refKey("BR") : refKey("UF-" + uf);
+      if (!cacheRefs[chave]) cacheRefs[chave] = j(path);
       return (await cacheRefs[chave])?.[rede] || {};
     };
-    const [ru, rb] = await Promise.all(
-      [uf ? refsDe(uf) : {}, refsDe("BR")]);
-    return ((ehEscola ? ent.itens : ramo.itens)[params.area] || []).map(
-      ([item, n, p, p_esp, hab, b, lingua]) => ({
-        item, n, p, p_esp, habilidade_inep: hab, param_b: b,
-        tp_lingua: lingua,
-        p_uf: ru[item] ?? null, p_br: rb[item] ?? null,
-      }));
+    const [ru, rb] = await Promise.all([
+      params.nivel === "MUN" && uf ? refsDeAno(false) : {},
+      refsDeAno(true),
+    ]);
+    return rows.map(([item, n, p, p_esp, hab, b, lingua]) => ({
+      item, n, p, p_esp, habilidade_inep: hab, param_b: b,
+      tp_lingua: lingua,
+      p_uf: ru[item] ?? null, p_br: rb[item] ?? null,
+    }));
+  }
+  if (rota === "historico_br") {
+    // usado pelo lineChart de evolução — carregado uma vez.
+    if (!historicoBrCache) {
+      historicoBrCache = j("api/entidade/BR/BR.json").then((d) =>
+        d?.[rede]?.hist_resumo || []);
+    }
+    return historicoBrCache;
   }
 }
 
@@ -121,7 +207,7 @@ $("#sel-mun").addEventListener("change", async (e) => {
   refresh();
 });
 
-/* ---------- combobox de escolas (busca digitável) ------------------------- */
+/* ---------- combobox de escolas ------------------------------------------ */
 let escolasMun = [];
 const inpEsc = $("#inp-esc");
 const comboList = $("#combo-list");
@@ -169,7 +255,8 @@ document.querySelectorAll("#tabs-rede button").forEach((b) => {
     document.querySelectorAll("#tabs-rede button").forEach((x) => x.classList.remove("on"));
     b.classList.add("on");
     state.rede = b.dataset.rede;
-    // recarrega listas dependentes preservando a seleção quando possível
+    // ao trocar rede, o histórico global do BR muda também
+    historicoBrCache = null;
     if (state.uf) {
       const muns = await api("municipios", { uf: state.uf });
       fillSelect($("#sel-mun"), muns, "Todos os municípios", "chave", "nome");
@@ -187,7 +274,7 @@ document.querySelectorAll("#tabs-rede button").forEach((b) => {
         busca: `${x.rotulo} ${x.chave}`.toLowerCase(),
       })));
       if (state.esc && escolasMun.some((e) => String(e.chave) === state.esc)) {
-        inpEsc.value = rotuloAtual;   // escola continua válida nesta rede
+        inpEsc.value = rotuloAtual;
       } else {
         state.esc = "";
       }
@@ -205,33 +292,95 @@ $("#btn-limpar").addEventListener("click", () => {
 });
 
 /* ---------- render: cabeçalho + KPIs ------------------------------------- */
-function kpiCard(sigla, alvo, ctx) {
-  const campo = sigla === "RED" ? "media_red" : `media_${sigla.toLowerCase()}`;
+function serieHist(hist, campo) {
+  return ANOS.map((a) => {
+    const r = hist.find((x) => x.ano === a);
+    return r ? r[campo] : null;
+  });
+}
+
+function kpiCard(sigla, alvo, ctx, hist) {
+  const campo = sigla === "GERAL" ? "media_geral"
+              : sigla === "RED"   ? "media_red"
+                                  : `media_${sigla.toLowerCase()}`;
   const info = sigla === "GERAL"
     ? { nome: "Média geral", cor: "var(--pink)" } : AREA_INFO[sigla];
-  const c = sigla === "GERAL" ? "media_geral" : campo;
-  const val = alvo[c];
-  const ref = ctx.length ? ctx[ctx.length - 1][c] : null; // último = Brasil
+  const val = alvo[campo];
+  const ref = ctx.length ? ctx[ctx.length - 1][campo] : null;
   let cmp = "";
   if (ref != null && val != null) {
     const d = val - ref;
     const cls = d >= 0 ? "up" : "down";
     cmp = `<span class="${cls}">${d >= 0 ? "+" : ""}${fmt(d)}</span> vs Brasil`;
   }
+  const serie = hist && hist.length ? serieHist(hist, campo) : null;
+  const sparkHtml = serie && serie.filter((v) => v != null).length >= 2
+    ? window.Charts.sparkline(serie, { cor: info.cor, anos: ANOS })
+    : "";
   return `<div class="kpi">
     <div class="kpi-top" style="background:${info.cor}">${info.nome}</div>
     <div class="kpi-body">
       <div class="kpi-num">${fmt(val)}</div>
       <div class="kpi-cmp">${cmp}</div>
+      ${sparkHtml ? `<div class="kpi-spark" title="2021–2025">${sparkHtml}</div>` : ""}
     </div></div>`;
 }
 
+async function renderEvolucao(hist, alvoNome, nivel) {
+  const bloco = $("#evolucao");
+  const body = $("#evolucao-body");
+  const nota = $("#evolucao-nota");
+  bloco.hidden = false;
+  nota.hidden = true;
+
+  if (!hist || hist.length < 2) {
+    body.innerHTML = "";
+    bloco.hidden = true;
+    return;
+  }
+
+  // séries: geral do alvo (linha destaque) e — se não for BR — geral do BR.
+  const series = [
+    { nome: alvoNome, cor: "var(--pink)",
+      valores: serieHist(hist, "media_geral") },
+  ];
+  if (nivel !== "BR") {
+    const histBr = await api("historico_br");
+    if (histBr && histBr.length) {
+      series.push({
+        nome: "Média geral", cor: "var(--pink)", estilo: "brasil",
+        valores: serieHist(histBr, "media_geral"),
+      });
+    }
+  }
+  // adiciona linhas por área — só do alvo, pra não poluir demais
+  const areasSeries = ["LC", "CH", "CN", "MT"].map((sigla) => ({
+    nome: AREA_INFO[sigla].nome, cor: AREA_INFO[sigla].cor,
+    valores: serieHist(hist, `media_${sigla.toLowerCase()}`),
+  }));
+
+  body.innerHTML = window.Charts.lineChart(
+    [...series, ...areasSeries],
+    { xLabels: ANOS });
+
+  // aviso se histórico da entidade é parcial (ex.: escola só 2024-2025)
+  const anosPresentes = hist.map((x) => x.ano);
+  if (anosPresentes.length < ANOS.length) {
+    const min = Math.min(...anosPresentes);
+    if (min > ANOS[0]) {
+      nota.textContent = "Antes de " + min +
+        " o INEP não expunha o código INEP nesta granularidade, portanto o histórico começa em " + min + ".";
+      nota.hidden = false;
+    }
+  }
+}
+
 function renderResumo(data) {
-  const { alvo, contexto } = data;
+  const { alvo, contexto, hist_resumo } = data;
   $("#ent-nome").textContent = alvo.nome;
   $("#ent-chip").textContent = NIVEL_NOME[alvo.nivel];
 
-  let meta = `${fmtInt(alvo.n_participantes)} concluintes participantes`;
+  let meta = `${fmtInt(alvo.n_participantes)} concluintes participantes em 2025`;
   if (state.rede !== "T" && !alvo.escola) meta += ` · ${REDE_NOME[state.rede]}`;
   if (alvo.escola) {
     const e = alvo.escola;
@@ -242,13 +391,13 @@ function renderResumo(data) {
   $("#ent-meta").textContent = meta;
 
   $("#kpis").innerHTML =
-    ["GERAL", "RED", "LC", "CH", "CN", "MT"].map((s) => kpiCard(s, alvo, contexto)).join("");
+    ["GERAL", "RED", "LC", "CH", "CN", "MT"]
+      .map((s) => kpiCard(s, alvo, contexto, hist_resumo)).join("");
 
-  // competências da redação (0–200): alvo vs contexto
   const linhas = [alvo, ...contexto];
   $("#comps").innerHTML = [1, 2, 3, 4, 5].map((i) => {
     const rows = linhas.map((l, ix) => barRow(
-      ix === 0 ? nomeCurto(l) : nomeCurto(l),
+      nomeCurto(l),
       l[`media_comp${i}`], 200,
       ix === 0 ? "var(--rose)" : "var(--ink-12)",
       fmt(l[`media_comp${i}`], 0)
@@ -257,7 +406,6 @@ function renderResumo(data) {
             Competência ${i}</div>${rows}`;
   }).join("");
 
-  // comparação por área
   $("#areas-comp").innerHTML = ["LC", "CH", "CN", "MT", "RED"].map((s) => {
     const campo = s === "RED" ? "media_red" : `media_${s.toLowerCase()}`;
     const info = AREA_INFO[s];
@@ -269,6 +417,21 @@ function renderResumo(data) {
     return `<div class="grp"><span class="dot" style="background:${info.cor}"></span>
             ${info.nome}</div>${rows}`;
   }).join("");
+
+  renderEvolucao(hist_resumo, alvo.nome, alvo.nivel);
+
+  // seletor de ano da tabela de itens: só tem sentido em BR/UF/MUN
+  // (a UI de escola ainda mostra a prova de 2025 pra a escola específica).
+  const ehEscola = alvo.nivel === "ESC";
+  document.querySelectorAll("#tabs-ano button").forEach((b) => {
+    const ano = parseInt(b.dataset.ano, 10);
+    b.disabled = ehEscola && ano !== ANO_LATEST;
+  });
+  if (ehEscola && state.ano !== ANO_LATEST) {
+    state.ano = ANO_LATEST;
+    document.querySelectorAll("#tabs-ano button").forEach((x) => x.classList.remove("on"));
+    document.querySelector('#tabs-ano button[data-ano="2025"]').classList.add("on");
+  }
 }
 
 function nomeCurto(l) {
@@ -293,22 +456,100 @@ function classifB(b) {
   return ["b-dificil", `${fmt(b)} · difícil`];
 }
 
-function renderItens(rows, nivel) {
+/* Em LC, H5-H8 aparecem como 2 itens por versão (inglês + espanhol). Do
+ * ponto de vista da matriz é 1 item da mesma habilidade em 2 idiomas —
+ * fundimos as duas versões pra não duplicar visualmente, agregando por
+ * média ponderada em n. */
+function fundirLEM(rows) {
+  const lem = new Map();  // habilidade → array of rows (versões)
+  const outros = [];
+  for (const r of rows) {
+    if (r.tp_lingua === 0 || r.tp_lingua === 1) {
+      const arr = lem.get(r.habilidade_inep) || [];
+      arr.push(r);
+      lem.set(r.habilidade_inep, arr);
+    } else {
+      outros.push(r);
+    }
+  }
+  const fundidos = [];
+  for (const [hab, vers] of lem.entries()) {
+    if (vers.length === 1) { fundidos.push(vers[0]); continue; }
+    const nTot = vers.reduce((s, x) => s + (x.n || 0), 0) || 1;
+    const wavg = (campo) => {
+      const num = vers.reduce((s, x) => s + (x[campo] != null ? x[campo] * (x.n || 0) : 0), 0);
+      const den = vers.reduce((s, x) => s + (x[campo] != null ? (x.n || 0) : 0), 0);
+      return den ? num / den : null;
+    };
+    fundidos.push({
+      item: vers.map((x) => x.item).join("·"),
+      n: nTot,
+      p: wavg("p"),
+      p_esp: wavg("p_esp"),
+      p_uf: wavg("p_uf"),
+      p_br: wavg("p_br"),
+      habilidade_inep: hab,
+      habilidade_custom: vers[0].habilidade_custom,
+      param_b: wavg("param_b"),
+      tp_lingua: "MULTI",   // marca especial
+      _langs: [...new Set(vers.map((x) => x.tp_lingua === 0 ? "EN" : "ES"))].sort(),
+      _n_itens: vers.length,  // pra tooltip: quantos itens únicos foram fundidos
+    });
+  }
+  const out = [...outros, ...fundidos];
+  out.sort((a, b) => (a.p ?? 2) - (b.p ?? 2));
+  return out;
+}
+
+function renderItens(rowsRaw, nivel) {
   const tb = $("#tbl-itens tbody");
+  let rows = state.area === "LC" ? fundirLEM(rowsRaw) : rowsRaw;
+
+  // filtro por competência (clicada no card de competências)
+  if (state.comp_filtro) {
+    const comps = window.COMPETENCIAS[state.area] || [];
+    const comp = comps.find((c) => c.n === state.comp_filtro);
+    if (comp) {
+      const hsSet = new Set(comp.hs);
+      rows = rows.filter((r) => hsSet.has(r.habilidade_inep));
+    }
+  }
+  atualizarBadgeFiltroComp();
+
   if (!rows.length) {
-    tb.innerHTML = `<tr><td colspan="8" class="skeleton">Sem dados para esta seleção.</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="7" class="skeleton">Sem dados para esta seleção.</td></tr>`;
     return;
   }
   const cor = AREA_INFO[state.area].cor;
+  // Nº de itens por habilidade. Em LEM (fundido) somamos _n_itens pra
+  // manter a contagem real (H7 → 3 itens: 2 EN + 1 ES), não 1 linha.
+  const habCount = rows.reduce((m, r) => {
+    if (r.habilidade_inep) {
+      m[r.habilidade_inep] = (m[r.habilidade_inep] || 0) + (r._n_itens || 1);
+    }
+    return m;
+  }, {});
   tb.innerHTML = rows.map((r) => {
     const hab = r.habilidade_custom || (r.habilidade_inep ? `H${r.habilidade_inep}` : "–");
+    const n = habCount[r.habilidade_inep] || 0;
+    // link do chip inclui filtros ativos pra que habilidade.html mostre o
+    // desempenho da mesma seleção (UF/MUN/ESC × rede) usada na página inicial.
+    const habLinkQs = new URLSearchParams({
+      area: state.area, h: r.habilidade_inep,
+      ...(state.uf   ? { uf:   state.uf   } : {}),
+      ...(state.mun  ? { mun:  state.mun  } : {}),
+      ...(state.esc  ? { esc:  state.esc  } : {}),
+      ...(state.rede !== "T" ? { rede: state.rede } : {}),
+    }).toString();
     const chip = r.habilidade_inep
       ? `<a class="chip-hab" target="_blank"
-            href="habilidade.html?area=${state.area}&h=${r.habilidade_inep}"
-            data-area="${state.area}" data-h="${r.habilidade_inep}">${hab}</a>`
+            href="habilidade.html?${habLinkQs}"
+            data-area="${state.area}" data-h="${r.habilidade_inep}"
+            title="${hab} · ${AREA_INFO[state.area].nome} — abre detalhes em nova aba">${hab}</a>`
       : `<span class="chip-hab">${hab}</span>`;
     const lang = r.tp_lingua === 0 ? `<span class="chip-lang">EN</span>`
-               : r.tp_lingua === 1 ? `<span class="chip-lang">ES</span>` : "";
+               : r.tp_lingua === 1 ? `<span class="chip-lang">ES</span>`
+               : r.tp_lingua === "MULTI" ? `<span class="chip-lang">${r._langs.join("·")}</span>` : "";
     const [bCls, bTxt] = classifB(r.param_b);
     const badge = (d) => d == null ? `<span class="delta-flat">–</span>`
       : Math.abs(d) < 0.005 ? `<span class="delta-flat">=</span>`
@@ -316,10 +557,13 @@ function renderItens(rows, nivel) {
               : `<span class="delta-down">${fmt(d * 100, 0)} pp</span>`;
     const dHtml = badge(r.p_br == null ? null : r.p - r.p_br);
     const dEspHtml = badge(r.p_esp == null ? null : r.p - r.p_esp);
-    const ufTd = nivel === "BR" || nivel === "UF" || r.p_uf == null ? "–" : `${fmt(r.p_uf * 100, 0)}%`;
+    // UF só some quando nivel === "BR" (aí não há UF selecionada); em
+    // UF/MUN/ESC mostra a média da UF pai — quando disponível.
+    const ufTd = nivel === "BR" || r.p_uf == null ? "–" : `${fmt(r.p_uf * 100, 0)}%`;
+    const brTd = r.p_br == null ? "–" : `${fmt(r.p_br * 100, 0)}%`;
     return `<tr>
-      <td class="item-code">${r.item}${lang}</td>
-      <td>${chip}</td>
+      <td>${chip}${lang}</td>
+      <td class="pct-n"><b>${n}</b></td>
       <td class="${bCls}">${bTxt}</td>
       <td class="col-bar">
         <div class="mini-track">
@@ -327,37 +571,309 @@ function renderItens(rows, nivel) {
           ${r.p_esp == null ? "" :
             `<div class="mini-mark" style="left:${r.p_esp * 100}%"
                   title="Esperado pela TRI: ${fmt(r.p_esp * 100, 0)}%"></div>`}
+          <span class="mini-val">${fmt(r.p * 100, 0)}%</span>
         </div>
+        ${r.p_br == null ? "" :
+          `<div class="mini-track-br" title="Acerto no Brasil: ${fmt(r.p_br * 100, 0)}%">
+             <div class="mini-fill-br" style="width:${r.p_br * 100}%"></div>
+           </div>`}
       </td>
-      <td class="pct">${fmt(r.p * 100, 0)}%</td>
-      <td>${ufTd} · ${r.p_br == null ? "–" : fmt(r.p_br * 100, 0) + "% BR"}</td>
+      <td class="pct-ref">${ufTd} · ${brTd}</td>
       <td>${dHtml}</td>
       <td>${dEspHtml}</td>
     </tr>`;
   }).join("");
-  // cabeçalho UF/BR compacto
-  const ths = document.querySelectorAll("#tbl-itens th");
-  ths[4].textContent = "% acerto";
-  ths[5].textContent = "Referências";
-  ths[6].textContent = "Δ Brasil";
 }
 
 async function loadItens() {
   const { nivel, chave } = nivelChave();
   $("#tbl-itens tbody").innerHTML =
-    `<tr><td colspan="8" class="skeleton">Carregando itens…</td></tr>`;
-  const rows = await api("itens", { nivel, chave, area: state.area });
+    `<tr><td colspan="7" class="skeleton">Carregando itens…</td></tr>`;
+  $("#tit-ano-itens").textContent = state.ano;
+  const rows = await api("itens", { nivel, chave, area: state.area, ano: state.ano });
   renderItens(rows, nivel);
 }
 
+/* Badge visual acima da tabela quando filtro por competência está ativo. */
+function atualizarBadgeFiltroComp() {
+  let el = document.getElementById("badge-comp");
+  if (!state.comp_filtro) { if (el) el.remove(); return; }
+  const comp = (window.COMPETENCIAS[state.area] || []).find((c) => c.n === state.comp_filtro);
+  if (!comp) return;
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "badge-comp";
+    el.className = "filtro-ativo";
+    const tabela = document.querySelector("#tbl-itens").closest(".card");
+    tabela.parentNode.insertBefore(el, tabela);
+  }
+  el.innerHTML = `<span>Filtrando por: <b>C${comp.n} · ${comp.titulo}</b>
+    <span style="color:var(--ink-40);font-weight:500;margin-left:6px">
+      (H${comp.hs[0]}–H${comp.hs[comp.hs.length-1]})
+    </span></span>
+    <button type="button" id="badge-comp-clr" class="btn-ghost btn-xs">✕ limpar</button>`;
+  document.getElementById("badge-comp-clr").onclick = () => {
+    state.comp_filtro = null;
+    renderCompetencias();
+    loadItens();
+  };
+}
+
+/* ---- render: desempenho por competência --------------------------------- */
+/* Dois modos:
+ *   - "atual"     — barras horizontais no ano selecionado (mostra alvo/BR/TRI).
+ *   - "evolucao"  — sparkline por competência ao longo de 2021-2025.
+ * Cliques nas linhas filtram a tabela de itens abaixo. */
+async function renderCompetencias() {
+  const card = document.getElementById("card-comp");
+  const body = document.getElementById("comp-body");
+  const sub = document.getElementById("tit-comp-sub");
+  if (!card || !body) return;
+
+  const comps = window.COMPETENCIAS[state.area] || [];
+  if (!comps.length) { card.hidden = true; return; }
+  card.hidden = false;
+
+  if (state.comp_modo === "evolucao") {
+    sub.textContent = "· 2021 – 2025";
+    await renderCompetenciasEvolucao(body, comps);
+  } else {
+    sub.textContent = `· ${state.ano}`;
+    await renderCompetenciasAtual(body, comps);
+  }
+}
+
+async function renderCompetenciasAtual(body, comps) {
+  const { nivel, chave } = nivelChave();
+  const rows = await api("itens", { nivel, chave, area: state.area, ano: state.ano });
+  const habToComp = window.HAB_TO_COMP[state.area] || {};
+  const cor = AREA_INFO[state.area].cor;
+
+  const agg = new Map();
+  for (const r of rows || []) {
+    if (!r.habilidade_inep) continue;
+    const c = habToComp[r.habilidade_inep];
+    if (!c) continue;
+    const a = agg.get(c.n) || { n: 0, acerto: 0, esp: 0, br: 0, itens: 0, hs: new Set() };
+    a.n += r.n || 0;
+    a.acerto += (r.p || 0) * (r.n || 0);
+    a.esp += (r.p_esp != null ? r.p_esp : 0) * (r.n || 0);
+    a.br += (r.p_br != null ? r.p_br : 0) * (r.n || 0);
+    a.itens += 1;
+    a.hs.add(r.habilidade_inep);
+    agg.set(c.n, a);
+  }
+
+  body.innerHTML = comps.map((c) => {
+    const ativa = state.comp_filtro === c.n ? "comp-ativa" : "";
+    const a = agg.get(c.n);
+    if (!a || !a.n) {
+      return `<div class="comp-row comp-row-vazio ${ativa}" data-comp="${c.n}">
+        <div class="comp-lbl">
+          <b>C${c.n}</b> · <span class="comp-tit">${c.titulo}</span>
+          <span class="comp-hs">H${c.hs[0]}–H${c.hs[c.hs.length-1]}</span>
+        </div>
+        <div class="comp-vazio">sem itens nesta prova</div>
+      </div>`;
+    }
+    const p = a.acerto / a.n;
+    const pEsp = a.esp / a.n;
+    const pBr = a.br / a.n;
+    return `<div class="comp-row ${ativa}" data-comp="${c.n}">
+      <div class="comp-lbl">
+        <b>C${c.n}</b> · <span class="comp-tit">${c.titulo}</span>
+        <span class="comp-hs">H${c.hs[0]}–H${c.hs[c.hs.length-1]} · ${a.itens} ${a.itens===1?"item":"itens"}</span>
+      </div>
+      <div class="comp-bar">
+        <div class="mini-track">
+          <div class="mini-fill" style="width:${p*100}%;background:${cor}"></div>
+          ${pEsp ? `<div class="mini-mark" style="left:${pEsp*100}%"
+                title="Esperado pela TRI: ${fmt(pEsp*100,0)}%"></div>` : ""}
+          <span class="mini-val">${fmt(p*100,0)}%</span>
+        </div>
+        ${pBr ? `<div class="mini-track-br" title="Brasil: ${fmt(pBr*100,0)}%">
+                  <div class="mini-fill-br" style="width:${pBr*100}%"></div>
+                </div>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+  aplicarHandlersCompRows();
+}
+
+const _cacheHistItens = {};
+async function fetchHistItens(nivel, chave) {
+  const k = `${nivel}/${chave}`;
+  if (_cacheHistItens[k]) return _cacheHistItens[k];
+  const url = nivel === "ESC" ? null : `api/historico/${k}.json`;
+  _cacheHistItens[k] = url ? fetch(url).then((r) => r.ok ? r.json() : null) : Promise.resolve(null);
+  return _cacheHistItens[k];
+}
+
+async function renderCompetenciasEvolucao(body, comps) {
+  const { nivel, chave } = nivelChave();
+  const rede = state.rede || "T";
+  const habToComp = window.HAB_TO_COMP[state.area] || {};
+  const cor = AREA_INFO[state.area].cor;
+
+  // Buscar histórico do alvo. Se ESC, não há /historico/ — mostra só o BR.
+  const [hist, histBr] = await Promise.all([
+    fetchHistItens(nivel, chave),
+    fetchHistItens("BR", "BR"),
+  ]);
+
+  const serieParaAlvo = (comp, bloco) => ANOS.map((ano) => {
+    const lst = bloco?.[rede]?.por_ano?.[String(ano)]?.[state.area] || [];
+    let sn = 0, sp = 0;
+    for (const [co, n, p] of lst) {
+      const h = _habFromCoItem(co);
+      // fallback: se não temos meta, usamos o próprio filtro só quando dá
+      const c = habToComp[h];
+      if (c && c.n === comp.n && p != null && n) {
+        sn += n; sp += p * n;
+      }
+    }
+    return sn ? Math.round((sp / sn) * 100) : null;
+  });
+
+  // Sem meta de CO_ITEM → habilidade no cliente, a série alvo fica vazia.
+  // Uso habilidades/{area}/{h}.json pra fallback do BR (já tem p_br por ano).
+  const habBrCache = {};
+  async function getBrHabAno(h) {
+    if (!habBrCache[h]) {
+      habBrCache[h] = fetch(`api/habilidades/${state.area}/${h}.json`)
+        .then((r) => r.ok ? r.json() : null);
+    }
+    return habBrCache[h];
+  }
+
+  // BR: pra cada competência, agrega média ponderada dos itens de H nesse ano
+  const seriesBrPorComp = {};
+  for (const c of comps) {
+    const porAno = ANOS.map(() => ({ n: 0, acc: 0 }));
+    for (const h of c.hs) {
+      const j = await getBrHabAno(h);
+      if (!j) continue;
+      ANOS.forEach((ano, i) => {
+        const p = j.por_ano?.[String(ano)];
+        if (p && p.n_participantes_br && p.media_p_acerto_br != null) {
+          porAno[i].n += p.n_participantes_br;
+          porAno[i].acc += p.media_p_acerto_br * p.n_participantes_br;
+        }
+      });
+    }
+    seriesBrPorComp[c.n] = porAno.map((a) => a.n ? Math.round((a.acc / a.n) * 100) : null);
+  }
+
+  // Alvo: precisa mapear CO_ITEM → habilidade. Como o hist do alvo só tem
+  // 7-tupla com [item, n, p, p_esp, hab, ...], podemos filtrar direto pelo
+  // hab (índice 4) sem lookup.
+  const seriesAlvoPorComp = {};
+  if (hist && nivel !== "BR") {
+    for (const c of comps) {
+      const hsSet = new Set(c.hs);
+      seriesAlvoPorComp[c.n] = ANOS.map((ano) => {
+        const lst = hist[rede]?.por_ano?.[String(ano)]?.[state.area] || [];
+        let sn = 0, sp = 0;
+        for (const [, n, p, , hab] of lst) {
+          if (hsSet.has(hab) && p != null && n) {
+            sn += n; sp += p * n;
+          }
+        }
+        return sn ? Math.round((sp / sn) * 100) : null;
+      });
+    }
+  }
+
+  body.innerHTML = comps.map((c) => {
+    const ativa = state.comp_filtro === c.n ? "comp-ativa" : "";
+    const brSerie = seriesBrPorComp[c.n] || ANOS.map(() => null);
+    const alvoSerie = seriesAlvoPorComp[c.n];
+
+    const brSpark = window.Charts.sparkline(brSerie, {
+      cor: "var(--ink-40)", width: 200, height: 42, anos: ANOS,
+    });
+    const alvoSpark = alvoSerie
+      ? window.Charts.sparkline(alvoSerie, { cor, width: 200, height: 42, anos: ANOS })
+      : "";
+
+    const ultBr = brSerie[brSerie.length - 1];
+    const ultAlvo = alvoSerie ? alvoSerie[alvoSerie.length - 1] : null;
+    const valTxt = ultAlvo != null ? `${ultAlvo}%` : (ultBr != null ? `${ultBr}%` : "–");
+    return `<div class="comp-row comp-row-evo ${ativa}" data-comp="${c.n}">
+      <div class="comp-lbl">
+        <b>C${c.n}</b> · <span class="comp-tit">${c.titulo}</span>
+        <span class="comp-hs">H${c.hs[0]}–H${c.hs[c.hs.length-1]}</span>
+      </div>
+      <div class="comp-evo-spark">
+        ${alvoSpark ? `<div class="comp-evo-line" title="Sua seleção">${alvoSpark}</div>` : ""}
+        <div class="comp-evo-line" title="Brasil (rede T)">${brSpark}</div>
+      </div>
+      <div class="comp-evo-num">${valTxt}<div class="comp-evo-lbl">${alvoSerie ? "seleção 2025" : "Brasil 2025"}</div></div>
+    </div>`;
+  }).join("");
+  aplicarHandlersCompRows();
+}
+
+function _habFromCoItem() { return null; }   // placeholder — não usado
+
+function aplicarHandlersCompRows() {
+  document.querySelectorAll(".comp-row[data-comp]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const n = parseInt(row.dataset.comp, 10);
+      state.comp_filtro = state.comp_filtro === n ? null : n;
+      renderCompetencias();
+      loadItens();
+    });
+  });
+}
+
+function setActiveTab(selector, key, val) {
+  document.querySelectorAll(`${selector} button`).forEach((x) => {
+    x.classList.toggle("on", x.dataset[key] === String(val));
+  });
+}
+
+function setArea(area) {
+  state.area = area;
+  state.comp_filtro = null;    // trocar de área desativa filtro por competência
+  setActiveTab("#tabs-area", "area", area);
+  setActiveTab("#tabs-area-comp", "area", area);
+  writeStateToURL();
+  loadItens();
+  renderCompetencias();
+}
 document.querySelectorAll("#tabs-area button").forEach((b) => {
+  b.addEventListener("click", () => setArea(b.dataset.area));
+});
+document.querySelectorAll("#tabs-area-comp button").forEach((b) => {
+  b.addEventListener("click", () => setArea(b.dataset.area));
+});
+
+document.querySelectorAll("#tabs-modo-comp button").forEach((b) => {
   b.addEventListener("click", () => {
-    document.querySelectorAll("#tabs-area button").forEach((x) => x.classList.remove("on"));
-    b.classList.add("on");
-    state.area = b.dataset.area;
+    state.comp_modo = b.dataset.modo;
+    state.comp_filtro = null;   // trocar modo desativa filtro
+    setActiveTab("#tabs-modo-comp", "modo", state.comp_modo);
+    renderCompetencias();
     loadItens();
   });
 });
+
+document.querySelectorAll("#tabs-ano button").forEach((b) => {
+  b.addEventListener("click", () => {
+    if (b.disabled) return;
+    state.ano = parseInt(b.dataset.ano, 10);
+    setActiveTab("#tabs-ano", "ano", state.ano);
+    writeStateToURL();
+    loadItens();
+    renderCompetencias();
+    const subEl = document.getElementById("tit-comp-sub");
+    if (subEl) subEl.textContent = "· " + state.ano;
+  });
+});
+
+/* Chip da habilidade abre habilidade.html em nova aba (target="_blank"), sem
+   filtragem da tabela — comportamento nativo do <a>. */
 
 /* ---------- tooltip das habilidades --------------------------------------- */
 const tip = document.createElement("div");
@@ -392,30 +908,48 @@ async function refresh() {
     $("#kpis").innerHTML = "";
     $("#comps").innerHTML = "";
     $("#areas-comp").innerHTML = "";
+    $("#evolucao").hidden = true;
     $("#tbl-itens tbody").innerHTML =
-      `<tr><td colspan="8" class="skeleton">Sem dados para esta seleção.</td></tr>`;
+      `<tr><td colspan="7" class="skeleton">Sem dados para esta seleção.</td></tr>`;
     return;
   }
   renderResumo(data);
   loadItens();
+  renderCompetencias();
+  writeStateToURL();
 }
 
+readStateFromURL();
+
 initUFs().then(async () => {
-  // deep-link vindo do mapa: index.html?uf=PR ou ?uf=PR&mun=4106902
-  const params = new URLSearchParams(location.search);
-  const uf = params.get("uf");
-  const mun = params.get("mun");
-  if (!uf) { refresh(); return; }
-  $("#sel-uf").value = uf.toUpperCase();
+  // aplica seleções da URL (rede/area/ano/h) nos tabs
+  setActiveTab("#tabs-rede", "rede", state.rede);
+  setActiveTab("#tabs-area", "area", state.area);
+  setActiveTab("#tabs-area-comp", "area", state.area);
+  setActiveTab("#tabs-ano", "ano", state.ano);
+  const subElBoot = document.getElementById("tit-comp-sub");
+  if (subElBoot) subElBoot.textContent = "· " + state.ano;
+
+  if (!state.uf) { refresh(); return; }
+  $("#sel-uf").value = state.uf;
   $("#sel-uf").dispatchEvent(new Event("change"));
-  if (mun) {
+  if (state.mun) {
     for (let i = 0; i < 40; i++) {
       if ($("#sel-mun").options.length > 1) break;
       await new Promise((r) => setTimeout(r, 150));
     }
-    if ([...$("#sel-mun").options].some((o) => o.value === mun)) {
-      $("#sel-mun").value = mun;
+    if ([...$("#sel-mun").options].some((o) => o.value === state.mun)) {
+      $("#sel-mun").value = state.mun;
       $("#sel-mun").dispatchEvent(new Event("change"));
     }
+  }
+  if (state.esc) {
+    // aguarda a lista de escolas carregar e seleciona
+    for (let i = 0; i < 40; i++) {
+      if (escolasMun.length) break;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    const e = escolasMun.find((x) => String(x.chave) === String(state.esc));
+    if (e) { inpEsc.value = e.rotulo; refresh(); }
   }
 });

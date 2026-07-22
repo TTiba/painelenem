@@ -7,12 +7,14 @@ Gera em plataforma/deploy/:
   - api/ufs.json                       {"T":[...], "PUB":[...], "PRIV":[...]}
   - api/municipios/{UF}.json           idem
   - api/escolas/{co_municipio}.json    lista (filtro de rede é client-side)
-  - api/entidade/ESC/{chave}.json      {resumo:{alvo, contexto_por_rede}, itens}
-  - api/entidade/{BR|UF|MUN}/{chave}.json  {"T":{resumo,itens}, "PUB":…, "PRIV":…}
+  - api/entidade/ESC/{chave}.json      {resumo, itens, hist_resumo, hist_scope}
+  - api/entidade/{BR|UF|MUN}/{chave}.json  {"T":{resumo,itens,hist_resumo}, ...}
   - api/refs/{BR|UF}.json              {"T":{item:p}, …} p/ colunas UF·Brasil
+  - api/historico/{BR|UF|MUN|ESC}/{chave}.json (lazy — itens por ano)
+  - api/habilidades/index.json         heatmap cross-year (4×30×5)
+  - api/habilidades/{area}/{h}.json    120 arquivos — card de cobertura
 
-Itens como arrays compactos: [item, n, p, p_esp, habilidade, param_b, tp_lingua]
-(referências UF/BR são juntadas no cliente a partir de api/refs/).
+Itens compactos: [item, n, p, p_esp, habilidade, param_b, tp_lingua].
 
 Uso:  python3 pipeline/exporta_netlify.py
 """
@@ -23,12 +25,18 @@ import sqlite3
 import time
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB = os.path.join(BASE, "data", "enem2025.sqlite")
+DB_LATEST = os.path.join(BASE, "data", "enem2025.sqlite")
+DB_HIST = os.path.join(BASE, "data", "enem_hist.sqlite")
 WEB = os.path.join(BASE, "web")
 OUT = os.path.join(BASE, "deploy")
 
 DEPENDENCIA = {1: "Federal", 2: "Estadual", 3: "Municipal", 4: "Privada"}
 REDES = ("T", "PUB", "PRIV")
+ANOS = (2021, 2022, 2023, 2024, 2025)
+ANOS_COM_ESCOLA = (2024, 2025)
+
+HABILIDADES_JS = os.path.join(WEB, "habilidades.js")
+
 t0 = time.time()
 
 
@@ -46,17 +54,32 @@ def rnd(v, d=3):
     return None if v is None else round(float(v), d)
 
 
-con = sqlite3.connect(DB)
+# ---------------------------------------------------------------- conexões
+con = sqlite3.connect(DB_LATEST)
 con.row_factory = sqlite3.Row
+
+hist_con = None
+if os.path.exists(DB_HIST):
+    hist_con = sqlite3.connect(DB_HIST)
+    hist_con.row_factory = sqlite3.Row
+    log("enem_hist.sqlite disponível — emitindo série histórica")
+else:
+    log("enem_hist.sqlite AUSENTE — só o painel single-year será emitido")
 
 # ---------------------------------------------------------------- frontend
 log("Copiando frontend…")
 if os.path.exists(OUT):
     shutil.rmtree(OUT)
 shutil.copytree(WEB, OUT)
-for pagina in ("index.html", "mapa.html"):
-    p = os.path.join(OUT, pagina)
+for arq in os.listdir(OUT):
+    if not arq.endswith(".html"):
+        continue
+    p = os.path.join(OUT, arq)
     html = open(p, encoding="utf-8").read()
+    if "window.API_STATIC" in html:
+        continue      # já injetado (idempotente)
+    if '<link rel="stylesheet" href="styles.css">' not in html:
+        continue      # sem stylesheet → provavelmente não é página principal
     html = html.replace('<link rel="stylesheet" href="styles.css">',
                         '<link rel="stylesheet" href="styles.css">\n'
                         "<script>window.API_STATIC = 1;</script>")
@@ -64,8 +87,8 @@ for pagina in ("index.html", "mapa.html"):
 with open(os.path.join(OUT, "netlify.toml"), "w") as f:
     f.write('[build]\n  publish = "."\n')
 
-# ---------------------------------------------------------------- lookups
-log("Carregando lookups…")
+# ---------------------------------------------------------------- lookups (2025)
+log("Carregando lookups do ano corrente (2025)…")
 resumos = {(r["nivel"], str(r["chave"]), r["rede"]): dict(r)
            for r in con.execute("SELECT * FROM agg_resumo")}
 escolas = {str(r["chave"]): dict(r) for r in con.execute("SELECT * FROM escolas")}
@@ -76,7 +99,8 @@ def uf_de(nivel, chave):
     if nivel == "ESC":
         return escolas[chave]["uf"]
     if nivel == "MUN":
-        return resumos[("MUN", chave, "T")]["uf"]
+        r = resumos.get(("MUN", chave, "T"))
+        return r["uf"] if r else None
     if nivel == "UF":
         return chave
     return None
@@ -108,8 +132,40 @@ def monta_resumo(nivel, chave, rede):
     return {"alvo": alvo, "contexto": ctx}
 
 
+# ---------------------------------------------------------------- histórico
+#
+# hist_por_entidade[(nivel, chave, rede)] = [{ano, n_participantes, ...}, ...]
+# ordenado por ano crescente. Só carregado se enem_hist.sqlite existe.
+hist_por_entidade = {}
+FIELDS_HIST = ("n_participantes", "media_geral",
+               "media_cn", "media_ch", "media_lc", "media_mt", "media_red",
+               "media_comp1", "media_comp2", "media_comp3",
+               "media_comp4", "media_comp5")
+
+if hist_con is not None:
+    log("Carregando série histórica em memória…")
+    for r in hist_con.execute("""
+        SELECT ano, nivel, chave, rede, n_participantes, media_geral,
+               media_cn, media_ch, media_lc, media_mt, media_red,
+               media_comp1, media_comp2, media_comp3, media_comp4, media_comp5
+        FROM hist_resumo ORDER BY nivel, chave, rede, ano
+    """):
+        key = (r["nivel"], str(r["chave"]), r["rede"])
+        item = {"ano": r["ano"]}
+        for f in FIELDS_HIST:
+            item[f] = r[f]
+        if r["ano"] == 2021:
+            item["flag_pandemia"] = True
+        hist_por_entidade.setdefault(key, []).append(item)
+    log(f"  {len(hist_por_entidade):,} timelines (nivel×chave×rede)")
+
+
+def hist_para(nivel, chave, rede):
+    return hist_por_entidade.get((nivel, str(chave), rede), [])
+
+
 # ---------------------------------------------------------------- refs
-log("Gerando referências UF/BR por rede…")
+log("Gerando referências UF/BR por rede (ano corrente)…")
 refs = {}          # chave_ref -> {rede -> {item: p}}
 for r in con.execute("""SELECT nivel, chave, rede, CO_ITEM, n, acertos
                         FROM agg_item WHERE nivel IN ('BR','UF')"""):
@@ -157,12 +213,12 @@ for mun, lst in esc_por_mun.items():
     jdump(os.path.join(OUT, "api", "escolas", f"{mun}.json"), lst)
 
 # ---------------------------------------------------------------- entidades
-log("Gerando entidades (resumo + itens)… é a etapa longa")
+log("Gerando entidades (resumo + itens + hist_resumo)…")
 n_ent = 0
 
 
-def linhas_area(linhas):
-    """agrupa (CO_ITEM,n,acertos,esperado) por área com filtro de caderno"""
+def linhas_area_from_agg(linhas):
+    """agrupa (CO_ITEM,n,acertos,esperado) em 7-tuplas por área."""
     por_area = {}
     for co, n, a, e in linhas:
         m = meta.get(co)
@@ -183,15 +239,30 @@ def linhas_area(linhas):
 def flush(nivel, chave, por_rede):
     global n_ent
     if nivel == "ESC":
+        alvo = monta_resumo(nivel, chave, "T")
         doc = {
             "resumo": {
-                "alvo": monta_resumo(nivel, chave, "T")["alvo"],
+                "alvo": alvo["alvo"],
                 "contexto_por_rede": {
                     rv: monta_resumo(nivel, chave, rv)["contexto"]
                     for rv in REDES},
             },
-            "itens": linhas_area(por_rede.get("T", [])),
+            "itens": linhas_area_from_agg(por_rede.get("T", [])),
         }
+        h = hist_para("ESC", chave, "T")
+        if h:
+            doc["hist_resumo"] = h
+        # Escolas só existem nos microdados a partir de 2024. Se o histórico
+        # cobre menos que a janela completa, sinalizamos ao cliente pra ele
+        # explicar isso na UI (sem furos silenciosos).
+        anos_presentes = [x["ano"] for x in h]
+        if anos_presentes and min(anos_presentes) > min(ANOS):
+            doc["hist_scope"] = {
+                "primeiro_ano_com_escola": min(anos_presentes),
+                "nota": ("Antes de 2024 o INEP não expunha o código INEP "
+                         "nos microdados; portanto o histórico da escola "
+                         "começa em 2024."),
+            }
     else:
         doc = {}
         for rv in REDES:
@@ -199,8 +270,12 @@ def flush(nivel, chave, por_rede):
                 continue
             resumo = monta_resumo(nivel, chave, rv)
             if resumo:
-                doc[rv] = {"resumo": resumo,
-                           "itens": linhas_area(por_rede[rv])}
+                bloco = {"resumo": resumo,
+                         "itens": linhas_area_from_agg(por_rede[rv])}
+                h = hist_para(nivel, chave, rv)
+                if h:
+                    bloco["hist_resumo"] = h
+                doc[rv] = bloco
     jdump(os.path.join(OUT, "api", "entidade", nivel, f"{chave}.json"), doc)
     n_ent += 1
     if n_ent % 5000 == 0:
@@ -221,9 +296,251 @@ for r in cur:
 if atual:
     flush(atual[0], atual[1], buf)
 
-con.close()
+log(f"  total: {n_ent:,} entidades")
+
+# ---------------------------------------------------------------- historico/
+#
+# Endpoint lazy: itens por ano (7-tuplas). Só BR/UF/MUN — não ESC (que só
+# teria 2024/2025, e a UI de escola não muda de ano na tabela de itens).
+#
+# Refs BR/UF são emitidos em api/refs_hist/{ano}/{BR|UF/uf}.json para não
+# replicar os mesmos ~180 números em cada arquivo de município.
+if hist_con is not None:
+    log("Gerando api/refs_hist/… (referências históricas por ano/rede)")
+    refs_ano_dump = {}  # (ano, nivel, chave) -> {rede -> {CO_ITEM: p_acerto}}
+    for r in hist_con.execute("""
+        SELECT ano, nivel, chave, rede, CO_ITEM, p_acerto FROM hist_item
+        WHERE nivel IN ('BR','UF')
+    """):
+        refs_ano_dump.setdefault(
+            (r["ano"], r["nivel"], str(r["chave"])), {}
+        ).setdefault(r["rede"], {})[r["CO_ITEM"]] = rnd(r["p_acerto"])
+    for (ano, nivel, chave), por_rede in refs_ano_dump.items():
+        sub = "BR.json" if nivel == "BR" else f"UF/{chave}.json"
+        jdump(os.path.join(OUT, "api", "refs_hist", str(ano), sub), por_rede)
+    # index leve, útil pro cliente saber quais anos existem
+    jdump(os.path.join(OUT, "api", "refs_hist", "index.json"),
+          {"anos": list(ANOS)})
+
+    log("Gerando api/historico/… (itens por ano)")
+    meta_all = {r["CO_ITEM"]: dict(r) for r in hist_con.execute(
+        "SELECT CO_ITEM, area, habilidade_inep, param_a, param_b, param_c, tp_lingua FROM itens_meta_all")}
+
+    def linhas_area_hist(itens):
+        por_area = {}
+        for co, n, p, pe in itens:
+            m = meta_all.get(co)
+            if not m:
+                continue
+            por_area.setdefault(m["area"], []).append((co, n, p, pe, m))
+        out = {}
+        for area, lst in por_area.items():
+            n_max = max(x[1] for x in lst)
+            lst = [x for x in lst if x[1] >= 0.25 * n_max]
+            rows = [[co, n, rnd(p), rnd(pe),
+                     m["habilidade_inep"], rnd(m["param_b"], 2), m["tp_lingua"]]
+                    for co, n, p, pe, m in lst]
+            rows.sort(key=lambda x: x[2] if x[2] is not None else -1)
+            out[area] = rows
+        return out
+
+    hcur = hist_con.execute("""
+        SELECT ano, nivel, chave, rede, CO_ITEM, n, p_acerto, p_esp
+        FROM hist_item
+        WHERE nivel IN ('BR','UF','MUN')
+        ORDER BY nivel, chave, rede, ano
+    """)
+    n_hist = 0
+    atual = None
+    buf = {}
+
+    def flush_hist(nivel, chave):
+        global n_hist
+        if not buf:
+            return
+        tem_multiano = any(len(a.keys()) >= 2 for a in buf.values())
+        if not tem_multiano:
+            return
+        doc = {"uf": uf_de(nivel, chave)}
+        for rv, ano_map in buf.items():
+            por_ano = {}
+            for ano, itens in ano_map.items():
+                por_ano[str(ano)] = linhas_area_hist(itens)
+            doc[rv] = {"por_ano": por_ano}
+        jdump(os.path.join(OUT, "api", "historico", nivel, f"{chave}.json"), doc)
+        n_hist += 1
+        if n_hist % 2000 == 0:
+            log(f"  historico: {n_hist:,} entidades…")
+
+    for r in hcur:
+        k = (r["nivel"], str(r["chave"]))
+        if k != atual:
+            if atual is not None:
+                flush_hist(*atual)
+            atual, buf = k, {}
+        buf.setdefault(r["rede"], {}).setdefault(r["ano"], []).append(
+            (r["CO_ITEM"], r["n"], r["p_acerto"], r["p_esp"]))
+    if atual is not None:
+        flush_hist(*atual)
+    log(f"  historico: {n_hist:,} arquivos emitidos")
+
+# ---------------------------------------------------------------- habilidades
+if hist_con is not None:
+    log("Gerando api/habilidades/index.json + per-skill…")
+
+    descs = {"LC": {}, "CH": {}, "CN": {}, "MT": {}}
+    # habilidades.js → carrega descrições para embutir na resposta
+    if os.path.exists(HABILIDADES_JS):
+        import re
+        raw = open(HABILIDADES_JS, encoding="utf-8").read()
+        try:
+            data = raw.split("=", 1)[1].strip().rstrip(";")
+            # o arquivo usa aspas duplas em keys — é JSON válido a menos
+            # do trailing 'window.HABILIDADES ='; se falhar, seguimos sem desc.
+            descs_load = json.loads(data)
+            if isinstance(descs_load, dict):
+                for area, hs in descs_load.items():
+                    if area in descs:
+                        for h, desc in hs.items():
+                            descs[area][int(h)] = desc
+        except Exception as e:
+            log(f"  (aviso) não consegui parsear habilidades.js: {e}")
+
+    # index cross-year — recalculado direto do hist_item pra aplicar o filtro
+    # de caderno majoritário (`n >= 0.25 * n_max` por ano/área). Caso contrário,
+    # itens de reaplicação e provas adaptadas dobrariam a contagem.
+    idx = {"anos": list(ANOS), "areas": {"LC": {}, "CH": {}, "CN": {}, "MT": {}},
+           "totais_por_ano": {}}
+    for ano in ANOS:
+        idx["totais_por_ano"][str(ano)] = {"LC": 0, "CH": 0, "CN": 0, "MT": 0}
+
+    itens_br = list(hist_con.execute("""
+        SELECT hi.ano, im.area, im.habilidade_inep AS h, hi.CO_ITEM,
+               hi.n, hi.p_acerto
+        FROM hist_item hi
+        JOIN itens_meta_all im ON im.CO_ITEM = hi.CO_ITEM
+        WHERE hi.nivel='BR' AND hi.rede='T'
+    """))
+    n_max_por = {}   # (ano, area) -> max(n)
+    for r in itens_br:
+        k = (r["ano"], r["area"])
+        if r["n"] > n_max_por.get(k, 0):
+            n_max_por[k] = r["n"]
+    # bucket por (ano, area, h) com filtro aplicado
+    buckets = {}
+    for r in itens_br:
+        n_max = n_max_por[(r["ano"], r["area"])]
+        if r["n"] < 0.25 * n_max:
+            continue
+        key = (r["ano"], r["area"], int(r["h"]))
+        buckets.setdefault(key, []).append((r["n"], r["p_acerto"]))
+    for (ano, area, h), lst in buckets.items():
+        cell = idx["areas"][area].setdefault(str(h), {
+            "cob": [0] * len(ANOS),
+            "p":   [None] * len(ANOS),
+            "desc": descs.get(area, {}).get(h, ""),
+        })
+        i = ANOS.index(ano)
+        cell["cob"][i] = len(lst)
+        total_n = sum(x[0] for x in lst)
+        total_acc = sum(x[0] * x[1] for x in lst if x[1] is not None)
+        cell["p"][i] = rnd(total_acc / total_n) if total_n else None
+        idx["totais_por_ano"][str(ano)][area] += len(lst)
+    jdump(os.path.join(OUT, "api", "habilidades", "index.json"), idx)
+
+    # per-skill drill-down (120 arquivos)
+    # 1) coletar itens_meta_all
+    itens_by_hab = {}   # (area, h) -> list of dict(CO_ITEM, param_b, anos)
+    for r in hist_con.execute("""
+        SELECT CO_ITEM, area, habilidade_inep AS h, param_b, tp_lingua, anos
+        FROM itens_meta_all
+    """):
+        if r["area"] and r["h"] is not None:
+            itens_by_hab.setdefault((r["area"], int(r["h"])), []).append({
+                "CO_ITEM": r["CO_ITEM"],
+                "param_b": rnd(r["param_b"], 2),
+                "tp_lingua": r["tp_lingua"],
+                "anos": [int(x) for x in (r["anos"] or "").split(",") if x],
+            })
+
+    # 2) desempenho por (area, h, ano) — reusa itens_br + n_max_por já
+    #    computados (com o filtro de caderno majoritário aplicado).
+    per_year_items = {}  # (area, h, ano) -> list of {CO_ITEM, param_b, p_br, n_br}
+    for r in itens_br:
+        n_max = n_max_por[(r["ano"], r["area"])]
+        if r["n"] < 0.25 * n_max:
+            continue
+        per_year_items.setdefault(
+            (r["area"], int(r["h"]), r["ano"]), []
+        ).append({
+            "CO_ITEM": r["CO_ITEM"],
+            "param_b": None,
+            "p_br": rnd(r["p_acerto"]),
+            "n_br": int(r["n"]),
+        })
+
+    # popular param_b via meta_all
+    param_b_by_item = {}
+    for lst in itens_by_hab.values():
+        for it in lst:
+            param_b_by_item[it["CO_ITEM"]] = it["param_b"]
+    for lst in per_year_items.values():
+        for it in lst:
+            it["param_b"] = param_b_by_item.get(it["CO_ITEM"])
+
+    # 3) para cada (area, h) escrever um JSON
+    n_hab = 0
+    for area in ("LC", "CH", "CN", "MT"):
+        for h in range(1, 31):
+            key = (area, h)
+            desc = descs.get(area, {}).get(h, "")
+            por_ano = {}
+            for ano in ANOS:
+                itens_ano = per_year_items.get((area, h, ano), [])
+                itens_ano_ord = sorted(
+                    itens_ano, key=lambda x: (x["p_br"] if x["p_br"] is not None else 2))
+                if itens_ano_ord:
+                    total_n = sum(it["n_br"] for it in itens_ano_ord)
+                    total_acertos = sum(
+                        int(it["p_br"] * it["n_br"]) for it in itens_ano_ord
+                        if it["p_br"] is not None)
+                    media_p = rnd(total_acertos / total_n) if total_n else None
+                    por_ano[str(ano)] = {
+                        "n_itens": len(itens_ano_ord),
+                        "n_participantes_br": total_n,
+                        "media_p_acerto_br": media_p,
+                        "itens": [
+                            {"CO_ITEM": it["CO_ITEM"],
+                             "param_b": it["param_b"],
+                             "p_br": it["p_br"]}
+                            for it in itens_ano_ord
+                        ],
+                    }
+                else:
+                    por_ano[str(ano)] = {
+                        "n_itens": 0, "n_participantes_br": 0,
+                        "media_p_acerto_br": None, "itens": []}
+            # itens recorrentes: apareceram em mais de um ano
+            recorrentes = []
+            for it in itens_by_hab.get(key, []):
+                if len(it["anos"]) >= 2:
+                    recorrentes.append({
+                        "CO_ITEM": it["CO_ITEM"],
+                        "anos": it["anos"],
+                        "param_b": it["param_b"],
+                    })
+            doc = {"area": area, "h": h, "desc": desc,
+                   "por_ano": por_ano,
+                   "itens_recorrentes": recorrentes}
+            jdump(os.path.join(OUT, "api", "habilidades", area, f"{h}.json"), doc)
+            n_hab += 1
+    log(f"  habilidades: index + {n_hab} per-skill")
 
 # ---------------------------------------------------------------- resumo
+con.close()
+if hist_con is not None:
+    hist_con.close()
+
 total, n_arq = 0, 0
 for raiz, _, arquivos in os.walk(OUT):
     for a in arquivos:

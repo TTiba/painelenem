@@ -243,13 +243,22 @@ a.chip-hab:hover { background: var(--pink); color: var(--card); transform: trans
 .chip-hab {
   display: inline-block; background: var(--lilac); color: var(--ink);
   font-weight: 800; font-size: 12px; padding: 3px 10px; border-radius: 999px;
+  min-width: 46px; text-align: center;
 }
 .chip-lang { display: inline-block; font-size: 10.5px; font-weight: 800; padding: 2px 7px; border-radius: 999px; background: var(--cream); border: 1px solid var(--ink-12); margin-left: 6px; }
-.mini-track { background: var(--ink-06); border-radius: 999px; height: 14px; position: relative; }
+.mini-track { background: var(--ink-06); border-radius: 999px; height: 16px; position: relative; }
 .mini-fill { height: 100%; border-radius: 999px; }
 .mini-mark {
   position: absolute; top: -3px; bottom: -3px; width: 3px;
   background: var(--ink); border-radius: 2px; transform: translateX(-1.5px);
+}
+/* barra fininha embaixo mostrando o acerto Brasil como referência visual */
+.mini-track-br {
+  background: var(--ink-06); border-radius: 999px;
+  height: 4px; margin-top: 4px; position: relative;
+}
+.mini-fill-br {
+  height: 100%; border-radius: 999px; background: var(--lilac);
 }
 .pct { font-weight: 900; }
 .delta-up   { color: var(--green-ok); background: var(--green-bg); padding: 2px 9px; border-radius: 999px; font-weight: 800; font-size: 12px; }
@@ -352,5 +361,328 @@ a.chip-hab:hover { background: var(--pink); color: var(--card); transform: trans
 .li-txt small { color: rgba(59,20,42,.55); font-size: 12px; font-weight: 600; }
 .li-seta { font-weight: 900; font-size: 16px; flex: 0 0 auto; }
 .rodape { color: var(--ink-40); font-size: 12.5px; text-align: center; padding: 26px 0 40px; }
+
+/* ===== Histórico 2021–2025 ================================================ */
+.sub-hist { color: var(--ink); font-weight: 600; }
+
+.tabs-linha {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
+}
+.tabs-linha .tabs { margin-bottom: 0; }
+.tabs-ano button { font-size: 12.5px; padding: 5px 10px; }
+.tabs-ano button.on { background: var(--pink); border-color: var(--pink); color: #fff; }
+.tabs-ano button:disabled {
+  opacity: .35; cursor: not-allowed;
+  background: transparent; color: var(--ink-40); border-color: var(--ink-12);
+}
+.tabs-ano button[data-ano="2021"] { color: var(--red-bad); font-weight: 700; }
+.tabs-ano button[data-ano="2021"].on { background: var(--red-bg); color: var(--red-bad); border-color: var(--red-bad); }
+
+/* KPI sparkline */
+.kpi-spark { margin-top: 6px; opacity: .85; }
+.spark { display: block; }
+.spark-dot { fill: currentColor; opacity: .8; }
+.spark-2021 { fill: var(--red-bad); opacity: 1; }
+
+/* Line chart */
+.evolucao { padding-top: 20px; }
+.ln-wrap { width: 100%; }
+.ln-chart { width: 100%; height: auto; display: block; }
+.ln-chart .grid { stroke: var(--ink-12); stroke-width: .5; }
+.ln-chart .axis { font-size: 11px; fill: var(--ink-40); font-family: inherit; }
+.ln-chart .ln-dot { transition: r .15s; cursor: pointer; }
+.ln-chart .ln-dot:hover { r: 6; stroke: var(--card); stroke-width: 2; }
+.ln-tooltip {
+  position: absolute; z-index: 50; pointer-events: none;
+  background: var(--ink); color: var(--card);
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  font-size: 12.5px; line-height: 1.35;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  white-space: nowrap; min-width: 160px;
+}
+.ln-tooltip .ln-tip-head {
+  font-weight: 800; font-size: 13.5px; letter-spacing: -.005em;
+  margin-bottom: 6px; padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255,255,255,.14);
+}
+.ln-tooltip .ln-tip-row {
+  display: grid; grid-template-columns: 10px 1fr auto;
+  gap: 8px; align-items: center; padding: 2px 0;
+  opacity: .78;
+}
+.ln-tooltip .ln-tip-row.on { opacity: 1; font-weight: 700; }
+.ln-tooltip .ln-tip-swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.ln-tooltip .ln-tip-serie { font-size: 12.5px; }
+.ln-tooltip .ln-tip-v { font-size: 13.5px; font-weight: 800; }
+.ln-chart .ponto-2021 { stroke: var(--red-bad); stroke-width: 1.5; }
+.ln-legend { display: flex; flex-wrap: wrap; gap: 12px 18px; margin-top: 6px; font-size: 12.5px; color: var(--ink-40); }
+.ln-leg-item { display: inline-flex; align-items: center; gap: 6px; }
+.ln-leg-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+/* Heatmap (HTML/CSS grid — colunas 1fr, linhas finas) */
+.hm-grid {
+  display: grid;
+  grid-template-columns: 54px repeat(var(--n-cols), 1fr);
+  gap: 3px;
+  margin-top: 4px;
+}
+.hm-grid .hm-corner { background: transparent; }
+.hm-grid .hm-col-hdr {
+  font-size: 12px; font-weight: 800; color: var(--ink);
+  text-align: center; padding: 4px 0 8px;
+}
+.hm-grid .hm-row-hdr {
+  font-size: 11.5px; font-weight: 700; color: var(--ink);
+  text-align: right; padding-right: 10px; align-self: center;
+}
+.hm-grid .hm-cell {
+  height: 24px; display: flex; align-items: center; justify-content: center;
+  font-size: 11.5px; font-weight: 700; color: var(--ink);
+  border-radius: 4px;
+}
+.hm-grid .hm-clickable { cursor: pointer; transition: transform .1s, box-shadow .1s; }
+.hm-grid .hm-clickable:hover {
+  transform: scale(1.04);
+  box-shadow: 0 0 0 2px var(--ink);
+  z-index: 2;
+}
+
+/* Legenda de escala */
+.hm-legenda {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 4px 0; font-size: 12px; color: var(--ink-40);
+}
+.hm-legenda .hm-leg-bar {
+  flex: 0 0 260px; height: 12px; border-radius: 999px;
+  border: 1px solid var(--ink-12);
+}
+.hm-legenda .hm-leg-ticks {
+  flex: 0 0 260px; display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--ink-40); font-weight: 600; margin-top: 3px;
+}
+.hm-legenda .hm-leg-wrap { display: flex; flex-direction: column; }
+.hm-legenda .hm-leg-lbl { font-weight: 700; color: var(--ink); }
+
+/* Desempenho por competência ---------------------------------------------- */
+.comp-row {
+  display: grid; grid-template-columns: minmax(200px, 1fr) 2fr;
+  gap: 14px; align-items: center; padding: 10px 12px;
+  border-bottom: 1px dashed var(--ink-12);
+  cursor: pointer; border-radius: var(--radius-sm);
+  transition: background .12s;
+}
+.comp-row:hover { background: var(--cream-soft); }
+.comp-row.comp-ativa { background: var(--lilac); }
+.comp-row.comp-ativa .comp-hs { color: var(--ink); }
+.comp-row:last-child { border-bottom: none; }
+.comp-row-vazio { opacity: .55; cursor: default; }
+.comp-row-vazio:hover { background: transparent; }
+
+/* Modo evolução: sparklines e valor à direita */
+.comp-row-evo { grid-template-columns: minmax(200px, 1fr) minmax(200px, 2fr) auto; }
+.comp-evo-spark { display: flex; flex-direction: column; gap: 4px; }
+.comp-evo-line { line-height: 0; }
+.comp-evo-line .spark { display: block; }
+.comp-evo-num { text-align: right; font-size: 20px; font-weight: 900; line-height: 1; letter-spacing: -.02em; }
+.comp-evo-lbl { font-size: 11px; font-weight: 600; color: var(--ink-40); margin-top: 3px; }
+.comp-lbl b { font-weight: 900; font-size: 14px; }
+.comp-tit { font-size: 13.5px; }
+.comp-hs { display: block; font-size: 11.5px; color: var(--ink-40); font-weight: 600; margin-top: 2px; }
+.comp-vazio { font-size: 12px; color: var(--ink-40); font-style: italic; }
+.comp-bar { min-width: 220px; }
+.comp-bar .mini-track { height: 18px; }
+.comp-bar .mini-val { font-size: 12.5px; }
+
+/* Filtro ativo (por habilidade) ------------------------------------------- */
+.filtro-ativo {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; background: var(--lilac); color: var(--ink);
+  padding: 10px 16px; border-radius: 999px;
+  margin: 12px 0 -6px; font-size: 13.5px;
+}
+.filtro-ativo b { font-weight: 800; }
+.btn-xs { padding: 3px 12px; font-size: 12px; }
+
+.chip-hab-btn { cursor: pointer; }
+.chip-hab-btn:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+
+/* Tabela de itens — novos elementos após remover coluna Item */
+.tbl .pct-n { text-align: center; font-size: 15px; }
+.tbl .pct-n b { font-weight: 800; }
+.tbl .pct-ref { color: var(--ink-40); font-size: 13px; white-space: nowrap; }
+.mini-track { position: relative; }
+.mini-val {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  font-size: 11.5px; font-weight: 700; color: var(--ink); pointer-events: none;
+}
+
+/* Questões da habilidade (imagens WebP dos PDFs oficiais) */
+.hab-quest-grid { display: grid; gap: 28px; margin-top: 4px; }
+.hab-quest { border-top: 1px dashed var(--ink-12); padding-top: 22px; }
+.hab-quest:first-child { border-top: none; padding-top: 0; }
+.hab-quest-head {
+  border-left: 5px solid var(--ink); padding: 4px 0 4px 14px; margin-bottom: 14px;
+}
+.hab-quest-headline {
+  font-size: 22px; font-weight: 900; letter-spacing: -.015em; color: var(--ink);
+  line-height: 1.15;
+}
+.hab-quest-sub { font-size: 13px; color: var(--ink-40); font-weight: 600; margin-top: 3px; }
+.hab-quest-meta { font-size: 13px; color: var(--ink-40); font-weight: 600; margin-bottom: 8px; }
+
+/* Habilidades críticas ---------------------------------------------------- */
+.wrap-wide { max-width: 1360px; }
+.crit-controls {
+  display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start;
+}
+.crit-ctrl { min-width: 180px; }
+.crit-ctrl > label {
+  display: block; font-size: 11.5px; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--ink-40); font-weight: 800;
+  margin-bottom: 6px;
+}
+
+/* Tabela heatmap */
+.crit-tabela { width: 100%; }
+.crit-tabela thead th {
+  font-size: 11.5px; padding: 10px 6px; text-align: center;
+  border-bottom: 2px solid var(--ink-12); position: relative;
+}
+.crit-tabela thead th.sortable {
+  cursor: pointer; user-select: none;
+  transition: background .12s;
+}
+.crit-tabela thead th.sortable:hover { background: var(--cream-soft); }
+.crit-tabela thead th.sortable::after {
+  content: " ⇅"; font-size: 10px; opacity: .28; margin-left: 2px;
+  color: var(--ink-40); font-weight: 400;
+}
+.crit-tabela thead th.sort-asc::after {
+  content: " ↑"; opacity: 1; color: var(--pink); font-weight: 900;
+}
+.crit-tabela thead th.sort-desc::after {
+  content: " ↓"; opacity: 1; color: var(--pink); font-weight: 900;
+}
+.crit-tabela .crit-col-area { width: 44px; text-align: center; }
+.crit-tabela .crit-col-h { width: 60px; text-align: center; }
+.crit-tabela .crit-col-desc { text-align: left; max-width: 380px; }
+.crit-tabela .crit-col-ano,
+.crit-tabela .crit-col-media,
+.crit-tabela .crit-col-esp,
+.crit-tabela .crit-col-delta { width: 66px; text-align: center; }
+.crit-tabela .crit-col-media { border-left: 1px solid var(--ink-12); }
+.crit-tabela .crit-col-delta { border-left: 1px solid var(--ink-12); }
+
+/* Gap visual em torno da coluna Esperado (TRI): usa border da cor do fundo
+ * do card pra criar a ilusão de "espaço" entre células, separando visualmente
+ * a coluna das vizinhas (Média à esquerda, Δ à direita). */
+.crit-tabela .crit-col-esp {
+  border-left: 14px solid var(--card);
+  border-right: 8px solid var(--card);
+  padding-left: 6px; padding-right: 6px;
+}
+
+.crit-tabela tbody td { padding: 6px 4px; }
+.crit-tabela tbody td.crit-col-desc { font-size: 12.5px; line-height: 1.35; padding: 6px 10px; }
+.crit-tabela .crit-cel {
+  text-align: center; font-weight: 700; font-size: 12.5px;
+  color: var(--ink); border-radius: 4px; padding: 6px 2px;
+}
+.crit-tabela .crit-cel-vazio { text-align: center; color: var(--ink-40); font-size: 12px; }
+.crit-tabela .crit-delta { font-size: 11.5px; }
+.crit-tabela .crit-ano-inativo { opacity: .35; filter: grayscale(1); }
+.crit-tabela thead th.crit-th-inativo {
+  opacity: .5; text-decoration: line-through; color: var(--ink-40);
+}
+.crit-tabela tr:hover td:not(.crit-cel):not(.crit-cel-vazio) { background: var(--cream-soft); }
+.chip-area-tag {
+  display: inline-block; font-size: 11px; font-weight: 800;
+  padding: 3px 8px; border-radius: 999px; color: var(--ink);
+}
+.crit-tabela .chip-hab { text-decoration: none; }
+.crit-card {
+  display: grid; grid-template-columns: 60px 1fr;
+  gap: 18px; padding: 18px 4px;
+  border-top: 1px dashed var(--ink-12);
+}
+.crit-card:first-child { border-top: none; padding-top: 6px; }
+.crit-rank {
+  font-size: 26px; font-weight: 900; color: var(--pink);
+  letter-spacing: -.02em; padding-top: 4px;
+}
+.crit-meta {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin-bottom: 6px;
+}
+.crit-area-tag {
+  font-size: 12px; font-weight: 700; color: var(--ink); background: var(--cream-soft);
+  border: 1px solid var(--ink-12); padding: 3px 10px; border-radius: 999px;
+}
+.crit-comp { font-size: 12px; color: var(--ink-40); font-weight: 600; }
+.crit-tag-critico {
+  font-size: 11.5px; font-weight: 800; color: var(--red-bad);
+  background: var(--red-bg); padding: 3px 9px; border-radius: 999px;
+}
+.crit-desc {
+  margin: 0 0 12px; font-size: 15px; line-height: 1.4; font-weight: 500;
+  color: var(--ink);
+}
+.crit-nums {
+  display: grid; grid-template-columns: repeat(4, auto); gap: 20px;
+  align-items: center; justify-content: start;
+}
+.crit-num-val { font-size: 22px; font-weight: 900; letter-spacing: -.02em; color: var(--ink); line-height: 1; }
+.crit-num-lbl { font-size: 11.5px; color: var(--ink-40); font-weight: 600; margin-top: 3px; }
+.crit-spark { min-width: 200px; }
+.crit-link {
+  display: inline-block; margin-top: 10px; font-size: 13px; font-weight: 700;
+  color: var(--pink); text-decoration: none;
+}
+.crit-link:hover { text-decoration: underline; }
+@media (max-width: 700px) {
+  .crit-nums { grid-template-columns: repeat(2, auto); }
+  .crit-card { grid-template-columns: 44px 1fr; gap: 12px; }
+  .crit-rank { font-size: 20px; }
+}
+
+/* Hero refatorado da habilidade */
+.hab-area { font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-40); font-weight: 800; margin-bottom: 4px; }
+.hab-comp { font-size: 18px; font-weight: 800; color: var(--ink); letter-spacing: -.015em; }
+.hab-hero-sep { border: none; border-top: 1px dashed var(--ink-12); margin: 14px 0; }
+.hab-hab-line { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; flex-wrap: wrap; }
+.hab-hab-line .chip-hab { align-self: center; flex: 0 0 auto; }
+.hab-desc-txt { margin: 0; font-size: 16px; line-height: 1.45; color: var(--ink); font-weight: 500; }
+.hab-alvo { margin-top: 10px; font-size: 13px; color: var(--ink); background: var(--cream-soft); padding: 6px 12px; border-radius: 999px; display: inline-block; }
+.hab-alvo b { font-weight: 800; }
+.hab-quest-imgs { display: flex; flex-direction: column; gap: 6px; }
+.hab-quest-imgwrap {
+  display: block; border: 1px solid var(--ink-12); border-radius: var(--radius-sm);
+  overflow: hidden; box-shadow: 0 4px 12px var(--ink-06); transition: transform .12s;
+}
+.hab-quest-imgwrap:hover { transform: scale(1.005); box-shadow: 0 8px 18px var(--ink-12); }
+.hab-quest-imgwrap img { display: block; width: 100%; height: auto; }
+
+/* Cobertura tiles em habilidade.html */
+.hab-tiles {
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  gap: 12px; margin-top: 4px;
+}
+.hab-tile {
+  background: var(--cream-soft);
+  border: 1.5px solid var(--ink-12);
+  border-radius: var(--radius-sm);
+  padding: 14px 12px 12px;
+  text-align: center;
+}
+.hab-tile-vazio { opacity: .55; background: transparent; }
+.hab-tile-ano { font-size: 12.5px; color: var(--ink-40); font-weight: 600; }
+.hab-tile-flag { color: var(--red-bad); margin-left: 4px; }
+.hab-tile-num { font-size: 32px; font-weight: 900; line-height: 1; margin-top: 4px; letter-spacing: -.02em; }
+.hab-tile-lbl { font-size: 11.5px; color: var(--ink-40); margin: 2px 0 6px; }
+.hab-tile-p { font-size: 12.5px; color: var(--ink); font-weight: 600; }
+@media (max-width: 700px) {
+  .hab-tiles { grid-template-columns: repeat(3, 1fr); }
+}
 
 .skeleton { color: var(--ink-40); font-style: italic; padding: 18px 4px; }
