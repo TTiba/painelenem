@@ -931,25 +931,32 @@ initUFs().then(async () => {
   if (subElBoot) subElBoot.textContent = "· " + state.ano;
 
   if (!state.uf) { refresh(); return; }
+  // Salva mun/esc localmente ANTES de disparar sel-uf change (o handler zera state.mun e state.esc)
+  const munAlvo = state.mun;
+  const escAlvo = state.esc;
   $("#sel-uf").value = state.uf;
   $("#sel-uf").dispatchEvent(new Event("change"));
-  if (state.mun) {
+  if (munAlvo) {
     for (let i = 0; i < 40; i++) {
       if ($("#sel-mun").options.length > 1) break;
       await new Promise((r) => setTimeout(r, 150));
     }
-    if ([...$("#sel-mun").options].some((o) => o.value === state.mun)) {
-      $("#sel-mun").value = state.mun;
+    if ([...$("#sel-mun").options].some((o) => o.value === munAlvo)) {
+      $("#sel-mun").value = munAlvo;
       $("#sel-mun").dispatchEvent(new Event("change"));
     }
   }
-  if (state.esc) {
+  if (escAlvo) {
     // aguarda a lista de escolas carregar e seleciona
     for (let i = 0; i < 40; i++) {
       if (escolasMun.length) break;
       await new Promise((r) => setTimeout(r, 150));
     }
-    const e = escolasMun.find((x) => String(x.chave) === String(state.esc));
-    if (e) { inpEsc.value = e.rotulo; refresh(); }
+    const e = escolasMun.find((x) => String(x.chave) === String(escAlvo));
+    if (e) {
+      state.esc = e.chave;
+      inpEsc.value = e.rotulo;
+      refresh();
+    }
   }
 });

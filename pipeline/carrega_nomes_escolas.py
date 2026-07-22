@@ -7,23 +7,25 @@ Aceita qualquer CSV (separador ; ou ,) que tenha uma coluna com o código INEP
 Linhas cujo código não existe no banco (escola sem participantes no ENEM 2025)
 são ignoradas.
 
-Uso:  python3 pipeline/carrega_nomes_escolas.py caminho/escolas.csv
+Uso:  python3 pipeline/carrega_nomes_escolas.py caminho/escolas.csv [--sqlite ARQ]
 """
+import argparse
 import csv
 import os
 import sqlite3
-import sys
 
-DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                  "data", "enem2025.sqlite")
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_DEFAULT = os.path.join(BASE, "data", "enem2025.sqlite")
 
 COLS_INEP = {"INEP", "CO_ESCOLA", "CODIGO_INEP", "CO_ENTIDADE"}
-COLS_NOME = {"ESCOLA", "NOME", "NO_ESCOLA", "NO_ENTIDADE"}
+COLS_NOME = {"ESCOLA", "NOME", "NO_ESCOLA", "NO_ENTIDADE", "NOME_ESCOLA"}
 
-if len(sys.argv) != 2:
-    sys.exit(__doc__)
-
-caminho = sys.argv[1]
+_p = argparse.ArgumentParser(description=__doc__.strip())
+_p.add_argument("csv", help="caminho do CSV com códigos INEP e nomes")
+_p.add_argument("--sqlite", default=DB_DEFAULT, help=f"banco alvo (default: {DB_DEFAULT})")
+_args = _p.parse_args()
+caminho = _args.csv
+DB = _args.sqlite
 with open(caminho, newline="", encoding="utf-8-sig") as f:
     dialeto = csv.Sniffer().sniff(f.read(2048), delimiters=";,")
     f.seek(0)

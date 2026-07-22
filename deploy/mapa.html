@@ -20,18 +20,21 @@
     </div>
     <div class="topbar-links">
       <a href="index.html">Painel</a>
+      <a href="ranking_escolas.html">Ranking</a>
+      <a href="criticas.html">Análise</a>
       <a href="entenda.html">Entenda os dados</a>
       <span class="brand-by">um produto <b>Wayground</b></span>
     </div>
   </div>
 </header>
 
-<main class="wrap">
+<main class="wrap wrap-wide">
 
   <section class="card selector">
     <h1>Brasil no mapa 🗺️</h1>
     <p class="sub">Média de cada estado no ENEM 2025 (concluintes com escola identificada).
-       Passe o mouse para detalhes; clique num estado para abrir o painel dele.</p>
+       Passe o mouse para detalhes; clique num estado para abrir seus municípios,
+       clique num município para ver o detalhamento no painel à direita.</p>
     <div class="tabs tabs-rede" id="tabs-rede">
       <button data-rede="T" class="on">Todas as redes</button>
       <button data-rede="PUB">Públicas</button>
@@ -47,8 +50,9 @@
     </div>
   </section>
 
-  <div class="duo mapa-duo">
-    <section class="card">
+  <div class="mapa-layout">
+    <!-- Coluna do mapa -->
+    <section class="card mapa-card">
       <div class="card-head">
         <h3 id="mapa-titulo">Brasil</h3>
         <button id="btn-brasil" class="btn-ghost btn-mini" type="button" hidden>← Brasil</button>
@@ -62,17 +66,47 @@
         <span id="leg-max"></span>
       </div>
     </section>
-    <section class="card">
-      <div class="card-head">
-        <h3 id="rank-titulo">Ranking</h3>
-        <span class="hint">média na escala ENEM</span>
-      </div>
-      <label class="chk-minn">
-        <input type="checkbox" id="chk-minn">
-        incluir locais com menos de 30 concluintes
-      </label>
-      <div id="ranking" class="ranking"></div>
-    </section>
+
+    <!-- Coluna de detalhes -->
+    <div class="mapa-detalhes">
+
+      <section class="card">
+        <div class="card-head">
+          <h3 id="det-titulo">Brasil</h3>
+          <span class="hint" id="det-sub"></span>
+        </div>
+        <div id="det-kpis" class="det-kpis"></div>
+      </section>
+
+      <section id="card-hist" class="card" hidden>
+        <div class="card-head">
+          <h3 id="hist-titulo">Distribuição da nota</h3>
+          <span class="hint" id="hist-hint">acerto médio por faixa de 25 pontos · linha lilás = Brasil</span>
+        </div>
+        <div id="hist-body"></div>
+      </section>
+
+      <section id="card-top-esc" class="card">
+        <div class="card-head">
+          <h3 id="top-esc-titulo">Top 10 escolas</h3>
+          <span class="hint">média geral · escolas com ≥ 30 concluintes</span>
+        </div>
+        <div id="top-esc-body"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h3 id="rank-titulo">Ranking</h3>
+          <span class="hint">média na escala ENEM</span>
+        </div>
+        <label class="chk-minn">
+          <input type="checkbox" id="chk-minn">
+          incluir locais com menos de 30 concluintes
+        </label>
+        <div id="ranking" class="ranking"></div>
+      </section>
+
+    </div>
   </div>
 
   <footer class="rodape">
@@ -83,6 +117,7 @@
 
 <div id="map-tip" class="tooltip" hidden></div>
 
+<script src="filtros.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
 <script src="mapa.js"></script>

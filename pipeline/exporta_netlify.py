@@ -22,6 +22,8 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
+import sys
 import time
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -93,6 +95,17 @@ resumos = {(r["nivel"], str(r["chave"]), r["rede"]): dict(r)
            for r in con.execute("SELECT * FROM agg_resumo")}
 escolas = {str(r["chave"]): dict(r) for r in con.execute("SELECT * FROM escolas")}
 meta = {r["CO_ITEM"]: dict(r) for r in con.execute("SELECT * FROM itens_meta")}
+
+# Distribuição de nota por (nivel, chave, rede, campo) — só existe pra BR e UF
+# porque foi o escopo escolhido no build_db (municípios ficaram fora).
+hist_nota = {}   # (nivel, chave, rede) -> {campo: {bucket: n}}
+try:
+    for r in con.execute("SELECT nivel, chave, rede, campo, bucket, n FROM agg_hist_nota"):
+        key = (r["nivel"], str(r["chave"]), r["rede"])
+        hist_nota.setdefault(key, {}).setdefault(r["campo"], {})[r["bucket"]] = r["n"]
+    log(f"  hist_nota: {len(hist_nota):,} entidades")
+except sqlite3.OperationalError:
+    log("  (agg_hist_nota ausente — pule o histograma no export)")
 
 
 def uf_de(nivel, chave):
@@ -212,6 +225,74 @@ for mun, lst in esc_por_mun.items():
     lst.sort(key=lambda x: -x["n_participantes"])
     jdump(os.path.join(OUT, "api", "escolas", f"{mun}.json"), lst)
 
+# ---------------------------------------------------------------- top escolas
+# Ranking das melhores escolas por (nivel, chave, rede), ordenado por média
+# geral e cortado nas 30 primeiras com n_participantes >= 30 (evita ruído).
+log("Gerando top escolas por BR/UF/MUN…")
+TOP_N = 30
+MIN_N = 30
+
+def linha_esc(ch):
+    e = escolas[ch]
+    r = resumos.get(("ESC", ch, "T"))
+    if not r or (r.get("n_participantes") or 0) < MIN_N:
+        return None
+    return {
+        "chave": ch, "nome": e["nome"] or f"Escola INEP {ch}",
+        "uf": e["uf"],
+        "co_municipio": str(e["co_municipio"]),
+        "municipio": e["municipio"],   # nome — só rótulo
+        "dependencia": e["dependencia"],
+        "dependencia_nome": DEPENDENCIA.get(e["dependencia"], ""),
+        "n_participantes": r["n_participantes"],
+        "media_geral": r["media_geral"], "media_red": r["media_red"],
+        "media_lc": r["media_lc"], "media_ch": r["media_ch"],
+        "media_cn": r["media_cn"], "media_mt": r["media_mt"],
+    }
+
+por_uf = {}
+por_mun = {}
+todas = []
+for ch, e in escolas.items():
+    linha = linha_esc(ch)
+    if not linha:
+        continue
+    todas.append(linha)
+    por_uf.setdefault(linha["uf"], []).append(linha)
+    por_mun.setdefault(str(e["co_municipio"]), []).append(linha)
+
+def top_por_rede(linhas):
+    out = {}
+    for rv in REDES:
+        filtradas = linhas
+        if rv == "PUB":
+            filtradas = [x for x in linhas if x["dependencia"] != 4]
+        elif rv == "PRIV":
+            filtradas = [x for x in linhas if x["dependencia"] == 4]
+        filtradas = sorted(filtradas, key=lambda x: -(x["media_geral"] or 0))
+        out[rv] = filtradas[:TOP_N]
+    return out
+
+jdump(os.path.join(OUT, "api", "top_escolas", "BR.json"), top_por_rede(todas))
+for uf, ls in por_uf.items():
+    jdump(os.path.join(OUT, "api", "top_escolas", "UF", f"{uf}.json"),
+          top_por_rede(ls))
+for cod, ls in por_mun.items():
+    jdump(os.path.join(OUT, "api", "top_escolas", "MUN", f"{cod}.json"),
+          top_por_rede(ls))
+log(f"  top escolas: 1 BR + {len(por_uf)} UFs + {len(por_mun)} municípios")
+
+# Ranking completo (todas escolas com n>=30), sem filtro de rede — o cliente
+# filtra por `dependencia`. Um arquivo por escopo. Usado na página dedicada.
+def ordenadas(linhas):
+    return sorted(linhas, key=lambda x: -(x["media_geral"] or 0))
+
+jdump(os.path.join(OUT, "api", "top_escolas_full", "BR.json"), ordenadas(todas))
+for uf, ls in por_uf.items():
+    jdump(os.path.join(OUT, "api", "top_escolas_full", "UF", f"{uf}.json"),
+          ordenadas(ls))
+log(f"  top escolas full: {len(todas):,} escolas totais em BR + {len(por_uf)} UFs")
+
 # ---------------------------------------------------------------- entidades
 log("Gerando entidades (resumo + itens + hist_resumo)…")
 n_ent = 0
@@ -275,6 +356,10 @@ def flush(nivel, chave, por_rede):
                 h = hist_para(nivel, chave, rv)
                 if h:
                     bloco["hist_resumo"] = h
+                # distribuição de nota (só BR e UF)
+                hn = hist_nota.get((nivel, str(chave), rv))
+                if hn:
+                    bloco["hist_nota"] = hn
                 doc[rv] = bloco
     jdump(os.path.join(OUT, "api", "entidade", nivel, f"{chave}.json"), doc)
     n_ent += 1
@@ -540,6 +625,22 @@ if hist_con is not None:
 con.close()
 if hist_con is not None:
     hist_con.close()
+
+# Rebuild das imagens das questões (as pastas questoes/ e api/questoes/ foram
+# apagadas pelo shutil.rmtree do começo — precisamos regerá-las). Se o script
+# ou dependências (pdftoppm, cwebp) estiverem ausentes, seguimos sem quebrar.
+try:
+    script = os.path.join(BASE, "pipeline", "build_questoes_img.py")
+    if os.path.exists(script):
+        log("Regerando imagens das questões (build_questoes_img.py)…")
+        r = subprocess.run([sys.executable, script, "--ano", "2025"],
+                           capture_output=True, text=True, cwd=BASE)
+        if r.returncode == 0:
+            log("  imagens ok")
+        else:
+            log(f"  (aviso) falha ao gerar imagens: {r.stderr.strip()[:200]}")
+except Exception as e:
+    log(f"  (aviso) skip questoes img: {e}")
 
 total, n_arq = 0, 0
 for raiz, _, arquivos in os.walk(OUT):

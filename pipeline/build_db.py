@@ -270,6 +270,54 @@ def build(ano: int, dados_dir: str, db_out: str) -> None:
     n_item = con.execute("SELECT count(*) FROM agg_item").fetchone()[0]
     log(f"agg_item: {n_item:,} linhas")
 
+    # ------------------------------------------------------------ histograma
+    # Distribuição de nota em buckets de 25 pontos, para BR e UF × 3 redes.
+    # Campos: geral (média das 5), lc, ch, cn, mt, red.
+    # Municípios ficam de fora nesta versão (multiplicaria muito o volume;
+    # se precisar, dá pra habilitar filtrando n_participantes ≥ 100).
+    log("Agregando distribuição de nota (BR + UF)…")
+    con.execute("""
+        CREATE TABLE res_notas AS
+        SELECT k_uf, rede,
+               (NU_NOTA_CN + NU_NOTA_CH + NU_NOTA_LC + NU_NOTA_MT + NU_NOTA_REDACAO)/5.0
+                 AS geral,
+               NU_NOTA_LC AS lc, NU_NOTA_CH AS ch, NU_NOTA_CN AS cn,
+               NU_NOTA_MT AS mt, NU_NOTA_REDACAO AS red
+        FROM res_k
+        WHERE NU_NOTA_CN IS NOT NULL AND NU_NOTA_CH IS NOT NULL
+          AND NU_NOTA_LC IS NOT NULL AND NU_NOTA_MT IS NOT NULL
+          AND NU_NOTA_REDACAO IS NOT NULL
+    """)
+    partes_hist = []
+    for campo in ("geral", "lc", "ch", "cn", "mt", "red"):
+        # bucket = floor(nota/25)*25 (canto esquerdo), centro = bucket+12
+        for rv in ("T", "PUB", "PRIV"):
+            w = "" if rv == "T" else f"AND rede = '{rv}'"
+            # BR
+            partes_hist.append(f"""
+                SELECT 'BR' AS nivel, 'BR' AS chave, '{rv}' AS rede,
+                       '{campo}' AS campo,
+                       CAST(FLOOR({campo}/25)*25 AS INTEGER) AS bucket,
+                       count(*) AS n
+                FROM res_notas
+                WHERE {campo} IS NOT NULL {w}
+                GROUP BY bucket
+            """)
+            # UF
+            partes_hist.append(f"""
+                SELECT 'UF' AS nivel, k_uf AS chave, '{rv}' AS rede,
+                       '{campo}' AS campo,
+                       CAST(FLOOR({campo}/25)*25 AS INTEGER) AS bucket,
+                       count(*) AS n
+                FROM res_notas
+                WHERE {campo} IS NOT NULL {w}
+                GROUP BY k_uf, bucket
+            """)
+    con.execute("CREATE TABLE agg_hist_nota AS " + " UNION ALL ".join(partes_hist))
+    con.execute("DROP TABLE res_notas")
+    n_hist = con.execute("SELECT count(*) FROM agg_hist_nota").fetchone()[0]
+    log(f"agg_hist_nota: {n_hist:,} linhas")
+
     # ------------------------------------------------------------ SQLite
     log("Gravando SQLite…")
     os.makedirs(os.path.dirname(db_out), exist_ok=True)
@@ -278,7 +326,7 @@ def build(ano: int, dados_dir: str, db_out: str) -> None:
 
     con.execute("INSTALL sqlite; LOAD sqlite;")
     con.execute(f"ATTACH '{db_out}' AS out (TYPE sqlite)")
-    for t in ["agg_resumo", "escolas", "agg_item", "itens_meta"]:
+    for t in ["agg_resumo", "escolas", "agg_item", "itens_meta", "agg_hist_nota"]:
         con.execute(f"CREATE TABLE out.{t} AS SELECT * FROM {t}")
         log(f"  gravada {t}")
     con.execute("DETACH out")
@@ -290,6 +338,7 @@ def build(ano: int, dados_dir: str, db_out: str) -> None:
         CREATE INDEX ix_item   ON agg_item(nivel, chave, rede);
         CREATE INDEX ix_esc_mun ON escolas(co_municipio);
         CREATE INDEX ix_meta   ON itens_meta(CO_ITEM);
+        CREATE INDEX ix_hist   ON agg_hist_nota(nivel, chave, rede, campo);
         ANALYZE;
     """)
     sq.close()
