@@ -64,10 +64,13 @@ function desenha(features, aoClicar, rotulo) {
     .on("mousemove", (ev, d) => {
       const r = porChave[chaveDe(d)];
       tip.hidden = false;
+      const linhaN = r.n_lc != null
+        ? `${fmtInt(r.n_lc)} fizeram 1º dia · ${fmtInt(r.n_mt || 0)} fizeram 2º dia`
+        : `${fmtInt(r.n_participantes)} concluintes`;
       tip.innerHTML = r
         ? `<b>${r.nome}${vista.nivel === "BR" ? ` (${r.chave})` : ""}</b>
            ${METRICAS[metrica]}: <b style="color:var(--lime)">${fmt0(r[metrica])}</b><br>
-           <span style="color:var(--rose)">${fmtInt(r.n_participantes)} concluintes</span>
+           <span style="color:var(--rose)">${linhaN}</span>
            <span class="tip-cta">${vista.nivel === "BR"
              ? "Clique para abrir os municípios →"
              : "Clique para ver detalhes →"}</span>`
@@ -108,10 +111,16 @@ function pinta() {
   $("#rank-titulo").textContent = vista.nivel === "BR"
     ? `Estados · ${METRICAS[metrica]}` : `Municípios · ${METRICAS[metrica]}`;
   const incluiPequenos = $("#chk-minn").checked;
+  // Filtro >= 30 usa n_lc (presentes no 1º dia). Fallback pra n_participantes
+  // se o JSON ainda não tiver o campo (compat com deploys antigos).
+  const nPresentes = (d) => d.n_lc != null ? +d.n_lc : +d.n_participantes;
   const ord = [...dados].filter((d) => d[metrica] &&
-      (incluiPequenos || +d.n_participantes >= 30))
+      (incluiPequenos || nPresentes(d) >= 30))
     .sort((a, b) => b[metrica] - a[metrica]);
-  const conc = (n) => `${(+n).toLocaleString("pt-BR")} concluinte${+n === 1 ? "" : "s"}`;
+  const conc = (r) => {
+    const n = nPresentes(r);
+    return `${n.toLocaleString("pt-BR")} fizeram a prova${n === 1 ? "" : ""}`;
+  };
   $("#ranking").innerHTML = ord.map((r, i) => {
     // BR: clique carrega municípios; UF: clique carrega detalhes do município
     const onclick = vista.nivel === "BR"
@@ -119,8 +128,8 @@ function pinta() {
       : `event.preventDefault(); abreMunicipio('${r.chave}')`;
     return `<a class="rank-row" href="#" onclick="${onclick}">
       <span class="rank-pos">${i + 1}</span>
-      <span class="rank-uf" title="${r.nome} · ${conc(r.n_participantes)}">
-        ${r.nome}<small>${conc(r.n_participantes)}</small>
+      <span class="rank-uf" title="${r.nome} · ${conc(r)}">
+        ${r.nome}<small>${conc(r)}</small>
       </span>
       <span class="rank-bar"><span style="width:${
         Math.max(5, ((r[metrica] - mn) / (mx - mn || 1)) * 100)}%;
@@ -244,8 +253,8 @@ function renderKpis(alvo, nivel, chave) {
 
   el.innerHTML = `
     <div class="det-n">
-      <div class="det-n-val">${fmtInt(alvo.n_participantes)}</div>
-      <div class="det-n-lbl">concluintes com escola em 2025 · ${REDE_TXT()}</div>
+      <div class="det-n-val">${fmtInt(alvo.n_lc != null ? alvo.n_lc : alvo.n_participantes)}</div>
+      <div class="det-n-lbl">${alvo.n_lc != null ? "fizeram o 1º dia · " + fmtInt(alvo.n_mt) + " fizeram o 2º" : "concluintes com escola em 2025"} · ${REDE_TXT()}</div>
     </div>
     <div class="det-medias">
       ${[
@@ -384,7 +393,7 @@ async function renderTopEscolas(alvo) {
               title="${rot}${dep}${loc}">
       <span class="rank-pos">${i + 1}</span>
       <span class="top-esc-nome">
-        ${rot}<small>${dep}${loc} · ${fmtInt(e.n_participantes)} concluintes</small>
+        ${rot}<small>${dep}${loc} · ${fmtInt(e.n_lc != null ? e.n_lc : e.n_participantes)} fizeram a prova</small>
       </span>
       <span class="top-esc-val">${fmt0(e.media_geral)}</span>
     </a>`;

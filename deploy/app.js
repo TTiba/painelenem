@@ -380,7 +380,19 @@ function renderResumo(data) {
   $("#ent-nome").textContent = alvo.nome;
   $("#ent-chip").textContent = NIVEL_NOME[alvo.nivel];
 
-  let meta = `${fmtInt(alvo.n_participantes)} concluintes participantes em 2025`;
+  // "Presentes" = quem fez a prova. n_lc = 1º dia; n_mt = 2º dia. Se n_participantes
+  // (inscritos) > n_lc, mostra os dois pra ficar claro que houve ausentes.
+  const nLC = alvo.n_lc, nMT = alvo.n_mt, nInscritos = alvo.n_participantes;
+  const temPresenca = nLC != null && nMT != null;
+  let meta;
+  if (temPresenca) {
+    meta = `${fmtInt(nLC)} fizeram o 1º dia · ${fmtInt(nMT)} fizeram o 2º dia`;
+    if (nInscritos && nInscritos > nLC) {
+      meta += ` (de ${fmtInt(nInscritos)} inscritos)`;
+    }
+  } else {
+    meta = `${fmtInt(nInscritos)} concluintes participantes em 2025`;
+  }
   if (state.rede !== "T" && !alvo.escola) meta += ` · ${REDE_NOME[state.rede]}`;
   if (alvo.escola) {
     const e = alvo.escola;
