@@ -49,15 +49,19 @@ def api(path, qs):
     rede = rede_de(qs)
 
     if path == "/api/ufs":
-        return q("""SELECT chave, nome, n_participantes, media_geral,
-                           media_red, media_lc, media_ch, media_cn, media_mt
+        return q("""SELECT chave, nome, n_participantes,
+                           n_lc, n_ch, n_cn, n_mt, n_red,
+                           media_geral, media_red, media_lc, media_ch,
+                           media_cn, media_mt
                     FROM agg_resumo WHERE nivel='UF' AND rede=?
                     ORDER BY chave""", (rede,))
 
     if path == "/api/municipios":
         uf = qs.get("uf", [""])[0]
-        return q("""SELECT chave, nome, n_participantes, media_geral,
-                           media_red, media_lc, media_ch, media_cn, media_mt
+        return q("""SELECT chave, nome, n_participantes,
+                           n_lc, n_ch, n_cn, n_mt, n_red,
+                           media_geral, media_red, media_lc, media_ch,
+                           media_cn, media_mt
                     FROM agg_resumo WHERE nivel='MUN' AND uf=? AND rede=?
                     ORDER BY nome""", (uf, rede))
 
@@ -66,7 +70,7 @@ def api(path, qs):
         filtro_rede = {"PUB": "AND COALESCE(e.dependencia, 0) != 4",
                        "PRIV": "AND e.dependencia = 4"}.get(rede, "")
         rows = q(f"""SELECT e.chave, e.nome, e.dependencia, e.n_participantes,
-                           r.media_geral
+                           r.media_geral, r.n_lc, r.n_mt
                     FROM escolas e
                     JOIN agg_resumo r ON r.nivel='ESC' AND r.chave=e.chave
                                      AND r.rede='T'
@@ -147,6 +151,10 @@ def api(path, qs):
     return {"erro": "rota desconhecida"}
 
 
+BASE = os.path.dirname(os.path.abspath(__file__))
+DEPLOY_API = os.path.join(BASE, "deploy", "api")
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=WEB, **kw)
@@ -154,12 +162,35 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def _serve_deploy_static(self, path):
+        """Serve arquivo estático de deploy/api/. Retorna True se conseguiu."""
+        rel = path.lstrip("/").split("api/", 1)[1] if "/api/" in path else ""
+        if not rel:
+            return False
+        abs_path = os.path.normpath(os.path.join(DEPLOY_API, rel))
+        # blindagem contra path traversal
+        if not abs_path.startswith(DEPLOY_API) or not os.path.isfile(abs_path):
+            return False
+        with open(abs_path, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return True
+
     def do_GET(self):
         u = urlparse(self.path)
         if u.path.startswith("/api/"):
             try:
-                body = json.dumps(api(u.path, parse_qs(u.query)),
-                                  ensure_ascii=False).encode()
+                resp = api(u.path, parse_qs(u.query))
+                # rota não reconhecida do server dinâmico? tenta servir do
+                # deploy/api/ pré-gerado (top_escolas_full, refs, historico…)
+                if isinstance(resp, dict) and resp.get("erro") == "rota desconhecida":
+                    if self._serve_deploy_static(u.path):
+                        return
+                body = json.dumps(resp, ensure_ascii=False).encode()
                 self.send_response(200)
             except Exception as e:  # noqa: BLE001
                 body = json.dumps({"erro": str(e)}).encode()

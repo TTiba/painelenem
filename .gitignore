@@ -5,6 +5,10 @@ data/
 sp/
 sp_deploy/
 
+# Variante PR (acesso não-listado)
+pr/
+pr_deploy/
+
 # Deck / apresentação
 deck/
 

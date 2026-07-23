@@ -34,8 +34,8 @@
       Ranking de escolas · <span id="rk-escopo">Brasil</span>
     </h1>
     <p class="sub" style="max-width:780px;color:var(--ink-40);margin:0 0 4px">
-      Todas as escolas com pelo menos 30 concluintes no ENEM 2025 ordenadas
-      pela média geral (média das 4 áreas + redação). Média por área na escala
+      Todas as escolas com pelo menos <b>30 alunos presentes no 1º dia</b>
+      no ENEM 2025, ordenadas pela média geral. Média por área na escala
       ENEM 0–1000. Clique numa escola para abrir seu painel.
     </p>
   </section>
@@ -80,7 +80,8 @@
             <th class="rk-sort" data-sort="municipio">Município</th>
             <th class="rk-sort" data-sort="uf" style="width:70px">UF</th>
             <th class="rk-sort" data-sort="dependencia_nome" style="width:96px">Rede</th>
-            <th class="rk-sort" data-sort="n_participantes" style="width:70px;text-align:right">Alunos</th>
+            <th class="rk-sort" data-sort="n_lc" style="width:76px;text-align:right" title="Presentes no 1º dia (LC + CH)">1º dia</th>
+      <th class="rk-sort" data-sort="n_mt" style="width:76px;text-align:right" title="Presentes no 2º dia (CN + MT)">2º dia</th>
             <th class="rk-sort" data-sort="media_geral" style="text-align:right">Média geral</th>
             <th class="rk-sort" data-sort="media_red"   style="text-align:right">Redação</th>
             <th class="rk-sort" data-sort="media_lc"    style="text-align:right">LC</th>
@@ -90,13 +91,14 @@
           </tr>
         </thead>
         <tbody id="rk-tbody">
-          <tr><td colspan="12" class="skeleton" style="padding:24px;text-align:center">Carregando…</td></tr>
+          <tr><td colspan="13" class="skeleton" style="padding:24px;text-align:center">Carregando…</td></tr>
         </tbody>
       </table>
     </div>
     <p class="foot-note" style="margin-top:12px">
       Fonte: Microdados ENEM 2025 (INEP). Concluintes com escola identificada.
-      Escolas com menos de 30 concluintes ficam de fora para evitar ruído.
+      Escolas com menos de 30 alunos presentes no 1º dia ficam de fora para
+      evitar ruído amostral. 1º dia = Linguagens + Humanas; 2º dia = Natureza + Matemática.
     </p>
   </section>
 

@@ -189,7 +189,9 @@ for chave_ref, por_rede in refs.items():
 
 # ---------------------------------------------------------------- listas
 log("Gerando ufs/municípios/escolas…")
-CAMPOS_LISTA = ("chave", "nome", "n_participantes", "media_geral", "media_red",
+CAMPOS_LISTA = ("chave", "nome", "n_participantes",
+                "n_lc", "n_ch", "n_cn", "n_mt", "n_red",
+                "media_geral", "media_red",
                 "media_lc", "media_ch", "media_cn", "media_mt")
 
 
@@ -219,6 +221,7 @@ for ch, e in escolas.items():
     esc_por_mun.setdefault(str(e["co_municipio"]), []).append({
         "chave": ch, "nome": e["nome"], "dependencia": e["dependencia"],
         "n_participantes": e["n_participantes"],
+        "n_lc": r.get("n_lc"), "n_mt": r.get("n_mt"),
         "media_geral": r["media_geral"], "rotulo": rotulo,
     })
 for mun, lst in esc_por_mun.items():
@@ -227,7 +230,8 @@ for mun, lst in esc_por_mun.items():
 
 # ---------------------------------------------------------------- top escolas
 # Ranking das melhores escolas por (nivel, chave, rede), ordenado por média
-# geral e cortado nas 30 primeiras com n_participantes >= 30 (evita ruído).
+# geral. Filtro >=30 usa n_lc (presentes no 1º dia) — n_participantes conta
+# inscritos e pode inflar escolas de amostra minúscula.
 log("Gerando top escolas por BR/UF/MUN…")
 TOP_N = 30
 MIN_N = 30
@@ -235,7 +239,7 @@ MIN_N = 30
 def linha_esc(ch):
     e = escolas[ch]
     r = resumos.get(("ESC", ch, "T"))
-    if not r or (r.get("n_participantes") or 0) < MIN_N:
+    if not r or (r.get("n_lc") or 0) < MIN_N:
         return None
     return {
         "chave": ch, "nome": e["nome"] or f"Escola INEP {ch}",
@@ -245,6 +249,8 @@ def linha_esc(ch):
         "dependencia": e["dependencia"],
         "dependencia_nome": DEPENDENCIA.get(e["dependencia"], ""),
         "n_participantes": r["n_participantes"],
+        "n_lc": r.get("n_lc"), "n_ch": r.get("n_ch"),
+        "n_cn": r.get("n_cn"), "n_mt": r.get("n_mt"), "n_red": r.get("n_red"),
         "media_geral": r["media_geral"], "media_red": r["media_red"],
         "media_lc": r["media_lc"], "media_ch": r["media_ch"],
         "media_cn": r["media_cn"], "media_mt": r["media_mt"],
