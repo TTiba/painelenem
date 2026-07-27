@@ -14,6 +14,8 @@ from urllib.parse import urlparse, parse_qs
 BASE = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(BASE, "data", "enem2025.sqlite")
 WEB = os.path.join(BASE, "pr")
+DEPLOY_API = os.path.join(BASE, "deploy", "api")
+DEPLOY_QUESTOES = os.path.join(BASE, "deploy", "questoes")
 
 DEPENDENCIA = {1: "Federal", 2: "Estadual", 3: "Municipal", 4: "Privada"}
 
@@ -141,6 +143,39 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("X-Robots-Tag", "noindex, nofollow")
         super().end_headers()
 
+    def _serve_static(self, abs_path, ctype):
+        """Serve arquivo estático (fallback). Retorna True se conseguiu."""
+        if not os.path.isfile(abs_path):
+            return False
+        with open(abs_path, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return True
+
+    def _serve_deploy_api(self, path):
+        """Serve JSON estático de deploy/api/ (habilidades, questoes, historico…)."""
+        rel = path.lstrip("/").split("api/", 1)[1] if "/api/" in path else ""
+        if not rel:
+            return False
+        abs_path = os.path.normpath(os.path.join(DEPLOY_API, rel))
+        if not abs_path.startswith(DEPLOY_API):
+            return False
+        return self._serve_static(abs_path, "application/json; charset=utf-8")
+
+    def _serve_deploy_questoes(self, path):
+        """Serve WebP de deploy/questoes/ (imagens das provas oficiais)."""
+        rel = path.lstrip("/").split("questoes/", 1)[1] if "/questoes/" in path else ""
+        if not rel:
+            return False
+        abs_path = os.path.normpath(os.path.join(DEPLOY_QUESTOES, rel))
+        if not abs_path.startswith(DEPLOY_QUESTOES):
+            return False
+        return self._serve_static(abs_path, "image/webp")
+
     def do_GET(self):
         u = urlparse(self.path)
         # robots.txt inline (não depende de arquivo em disco)
@@ -154,8 +189,13 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if u.path.startswith("/api/"):
             try:
-                body = json.dumps(api(u.path, parse_qs(u.query)),
-                                  ensure_ascii=False).encode()
+                resp = api(u.path, parse_qs(u.query))
+                # rota não reconhecida do server dinâmico? tenta servir do
+                # deploy/api/ pré-gerado (habilidades, questoes, historico…)
+                if isinstance(resp, dict) and resp.get("erro") == "rota desconhecida":
+                    if self._serve_deploy_api(u.path):
+                        return
+                body = json.dumps(resp, ensure_ascii=False).encode()
                 self.send_response(200)
             except Exception as e:
                 body = json.dumps({"erro": str(e)}).encode()
@@ -164,6 +204,10 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif u.path.startswith("/questoes/"):
+            # imagens WebP das provas oficiais (compartilhadas com o nacional)
+            if not self._serve_deploy_questoes(u.path):
+                self.send_error(404)
         else:
             super().do_GET()
 
