@@ -26,3 +26,6 @@ venv/
 .vscode/
 .idea/
 *.swp
+
+# Prévia D=1 (gerada por pipeline/gera_preview_d1.py)
+deploy_d1/
