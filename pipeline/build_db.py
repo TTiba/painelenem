@@ -207,8 +207,15 @@ def build(ano: int, dados_dir: str, db_out: str) -> None:
             SELECT r.k_esc, r.k_mun, r.k_uf, r.rede, i.CO_ITEM,
                    CASE WHEN substr(r.TX_RESPOSTAS_{area}, i.pos, 1) = i.TX_GABARITO
                         THEN 1 ELSE 0 END AS acerto,
+                   -- 3PL sem a constante D: os NU_PARAM_A publicados pelo INEP
+                   -- já estão na métrica logística, então o fator 1,7 (conversão
+                   -- ogiva normal → logística) não se aplica aqui. Calibrado
+                   -- contra o acerto observado: erro +0,09 pp com D=1 contra
+                   -- -2,41 pp com D=1,7 (rede pública do PR, 50.328 alunos);
+                   -- três populações de 200 a 50 mil alunos convergem em
+                   -- D ótimo 0,97-1,02. Ver §Auditoria da TRI no status.md.
                    i.NU_PARAM_C + (1 - i.NU_PARAM_C) /
-                     (1 + exp(-1.7 * i.NU_PARAM_A *
+                     (1 + exp(-i.NU_PARAM_A *
                               ((r.NU_NOTA_{area} - 500) / 100.0 - i.NU_PARAM_B)))
                      AS p_esp
             FROM res_k r

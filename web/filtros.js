@@ -40,9 +40,26 @@
     return out;
   }
 
+  /* Página inicial aberta sem nenhum parâmetro = começar do zero.
+   *
+   * Sem isso o localStorage restaurava a última seleção e o painel abria
+   * pré-filtrado numa UF/município/escola, em vez de mostrar o Brasil. As
+   * outras páginas continuam lendo o localStorage — é ele que carrega o
+   * contexto entre elas, já que os links do topo não levam parâmetros. Como
+   * não existe link de volta pro index, chegar nele é sempre um começo
+   * deliberado.
+   *
+   * A rede (T/PUB/PRIV) não é resetada: é preferência de exibição, não
+   * navegação, e o default já é T. */
+  function entradaLimpa() {
+    if (location.search) return false;
+    const p = location.pathname.replace(/\/+$/, "");
+    return p === "" || p.endsWith("/index.html") || p === "index.html";
+  }
+
   function carregar() {
     const url = lerURL();
-    const ls  = lerLS();
+    const ls  = entradaLimpa() ? {} : lerLS();
     // uf vazio explícito na URL (ex.: veio de "Limpar") supera o LS
     const temUrlUf  = new URLSearchParams(location.search).has("uf");
     const temUrlMun = new URLSearchParams(location.search).has("mun");
@@ -51,7 +68,7 @@
       uf:   temUrlUf  ? (url.uf   || "") : (url.uf   ?? ls.uf   ?? DEFAULTS.uf),
       mun:  temUrlMun ? (url.mun  || "") : (url.mun  ?? ls.mun  ?? DEFAULTS.mun),
       esc:  temUrlEsc ? (url.esc  || "") : (url.esc  ?? ls.esc  ?? DEFAULTS.esc),
-      rede: url.rede  ?? ls.rede  ?? DEFAULTS.rede,
+      rede: url.rede  ?? lerLS().rede ?? DEFAULTS.rede,
     };
   }
 
