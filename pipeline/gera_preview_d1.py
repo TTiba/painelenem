@@ -4,8 +4,8 @@
 O rebuild definitivo (build_all_years.py + exporta_netlify.py, com o D=1 já
 corrigido no build_db.py) recalcula o p_esp aluno a aluno a partir dos
 microdados. Esta prévia NÃO substitui isso: ela reprocessa os JSONs já
-publicados, recalculando o p_esp dos itens de 2025 a partir dos parâmetros
-oficiais (a, b, c) e da distribuição de notas (hist_nota, buckets de 25 pts)
+publicados, recalculando o p_esp dos itens de TODOS os anos (2021-2025) a partir dos
+parâmetros oficiais (a, b, c) e da distribuição de notas (hist_nota, 25 pts)
 que cada entidade já carrega. Método validado no painel PR contra os θ exatos
 de uma escola reconstruída dos microdados: 0,02 pp de erro agregado.
 
@@ -13,7 +13,15 @@ Escopo: BR + as 27 UFs (entidade + bloco 2025 do historico). Municípios e
 escolas não têm hist_nota no deploy nacional — mantêm o valor antigo (a
 variante PR cobre municípios e escolas do PR via hist_nota_pr.json).
 Itens de língua estrangeira ficam null (a UI mostra "–"): não há distribuição
-de θ por língua. Anos 2021-2024 mantêm o valor antigo (sem parâmetros aqui).
+de θ por língua. Os parâmetros vêm de pipeline/params_itens.json, consolidado
+dos ITENS_PROVA_{ano}.csv (todos os anos) — arquivos de ~300 KB, não os
+microdados de resultados.
+
+Atenção sobre a série histórica: a distribuição de θ usada é a do ANO CORRENTE
+(hist_nota do deploy é de 2025). Para 2021-2024 isso é uma aproximação — o
+esperado daqueles anos sai calculado sobre o perfil de alunos de 2025. Serve
+pra ver a ordem de grandeza e a direção da correção, não como número final;
+o definitivo sai do rebuild, que usa o θ real de cada ano.
 
 Uso:  python3 pipeline/gera_preview_d1.py
       cd deploy_d1 && python3 -m http.server 9100
@@ -29,13 +37,14 @@ import time
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEPLOY = os.path.join(BASE, "deploy")
 OUT = os.path.join(BASE, "deploy_d1")
-PARAMS_PATH = os.path.join(BASE, "pipeline", "params_itens_2025.json")
+PARAMS_PATH = os.path.join(BASE, "pipeline", "params_itens.json")
+ANOS = ("2021", "2022", "2023", "2024", "2025")
 
 BANNER = (
     '<div style="position:sticky;top:0;z-index:9999;background:#5b21b6;color:#fff;'
     'padding:8px 16px;font:600 13px system-ui;text-align:center">'
-    "\U0001f9ea PRÉVIA · p_esp recalculado com D=1 na 3PL · BR e UFs, itens 2025 · "
-    "municípios/escolas e anos 2021-2024 mantêm o valor antigo · "
+    "\U0001f9ea PRÉVIA · p_esp recalculado com D=1 na 3PL · BR e UFs, 2021-2025 · "
+    "municípios/escolas mantêm o valor antigo · θ dos anos antigos aproximado · "
     "a versão definitiva sai do rebuild completo</div>"
 )
 
@@ -84,9 +93,10 @@ def patch(caminho, params, stats):
         grades = {a: grade(hn.get(a.lower(), {})) for a in ("CN", "CH", "LC", "MT")}
         if "itens" in bloco:
             corrigir(bloco["itens"], grades, params, stats)
-        lst = bloco.get("por_ano", {}).get("2025")
-        if lst:
-            corrigir(lst, grades, params, stats)
+        for ano in ANOS:
+            lst = bloco.get("por_ano", {}).get(ano)
+            if lst:
+                corrigir(lst, grades, params, stats)
     os.remove(caminho)                       # quebra o hardlink
     json.dump(doc, open(caminho, "w", encoding="utf-8"),
               ensure_ascii=False, separators=(",", ":"))
@@ -108,7 +118,7 @@ def main():
     print(f"Recalculando p_esp (D=1) de {len(alvos)} entidades…")
     for c in alvos:
         patch(c, params, stats)
-    # historico: BR + UFs, só o bloco 2025 (as distribuições vêm da entidade)
+    # historico: BR + UFs, todos os anos (as distribuições vêm da entidade)
     hist_alvos = ([os.path.join(OUT, "api", "historico", "BR", "BR.json")]
                   + sorted(glob.glob(os.path.join(OUT, "api", "historico", "UF", "*.json"))))
     for h in hist_alvos:
@@ -121,11 +131,13 @@ def main():
         doc_h = json.load(open(h, encoding="utf-8"))
         for rede in ("T", "PUB", "PRIV"):
             hn = doc_e.get(rede, {}).get("hist_nota")
-            lst = doc_h.get(rede, {}).get("por_ano", {}).get("2025")
-            if not hn or not lst:
+            if not hn:
                 continue
             grades = {a: grade(hn.get(a.lower(), {})) for a in ("CN", "CH", "LC", "MT")}
-            corrigir(lst, grades, params, stats)
+            for ano in ANOS:
+                lst = doc_h.get(rede, {}).get("por_ano", {}).get(ano)
+                if lst:
+                    corrigir(lst, grades, params, stats)
         os.remove(h)
         json.dump(doc_h, open(h, "w", encoding="utf-8"),
                   ensure_ascii=False, separators=(",", ":"))

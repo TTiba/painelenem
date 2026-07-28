@@ -51,6 +51,61 @@ def sem_acento(s):
     return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode()
 
 
+# ------------------------------------------------------- descoberta de fontes
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MICRO = os.path.dirname(REPO)      # onde ficam os microdados_enem_{ano}/
+
+
+def _identifica_pdf(caminho):
+    """(dia, cor, reaplicacao) lendo o rodapé de páginas do miolo.
+
+    Os nomes dos PDFs oficiais variam demais entre downloads (CD1/CD7/CD8,
+    "_blue", "_1"…) e a cor nem sempre está no nome — o CD8 de 2025 é VERDE.
+    Então identificamos pelo conteúdo, que é o único critério confiável.
+    """
+    try:
+        doc = pymupdf.open(caminho)
+    except Exception:
+        return None, None, None
+    cores = ("AZUL", "AMARELO", "ROSA", "CINZA", "VERDE", "BRANCO")
+    dia = cor = None
+    reap = False
+    for i in range(3, min(12, len(doc))):
+        t = sem_acento(doc[i].get_text().upper())
+        if "APLICACAO" in t and re.search(r"2\s*A?\s*APLICACAO", t):
+            reap = True
+        m = re.search(r"CADERNO\s+\d+\s*[-|•·]?\s*(" + "|".join(cores) + ")", t)
+        if m and cor is None:
+            cor = m.group(1)
+        if dia is None:
+            if re.search(r"1\s*.?\s*DIA", t):
+                dia = 1
+            elif re.search(r"2\s*.?\s*DIA", t):
+                dia = 2
+        if cor and dia:
+            break
+    doc.close()
+    return dia, cor, reap
+
+
+def achar_pdfs(ano, dirs_extra=()):
+    """{1: caminho_d1, 2: caminho_d2} dos cadernos AZUL da 1ª aplicação."""
+    cands = []
+    for d in list(dirs_extra) + [
+            os.path.join(MICRO, f"microdados_enem_{ano}", "PROVAS E GABARITOS"),
+            os.path.join(MICRO, f"microdados_enem_{ano}", "PROVAS"),
+            os.path.join(REPO, "provas", str(ano))]:
+        if os.path.isdir(d):
+            cands += sorted(glob.glob(os.path.join(d, "*.pdf")))
+    achados = {}
+    for c in cands:
+        dia, cor, reap = _identifica_pdf(c)
+        if cor != "AZUL" or dia not in (1, 2) or reap:
+            continue
+        achados.setdefault(dia, c)
+    return achados
+
+
 # --------------------------------------------------------------- CSV / painel
 def achar_provas_regulares(csv_path, deploy, ano):
     rows = list(csv.DictReader(open(csv_path, encoding="latin-1"), delimiter=";"))
@@ -384,11 +439,27 @@ def main():
                     "posições já existentes em api/questoes/{ano}.json")
     ap.add_argument("--pdf-d1")
     ap.add_argument("--pdf-d2")
+    ap.add_argument("--pdf-dir", action="append", default=[],
+                    help="pasta extra pra procurar os PDFs (repetível)")
     ap.add_argument("--deploy", default="pr2_deploy")
     args = ap.parse_args()
     if not args.pdf_d1 and not args.pdf_d2:
-        sys.exit("informe --pdf-d1 e/ou --pdf-d2")
+        # sem PDFs explícitos: procura na pasta convencional dos microdados e
+        # identifica os cadernos AZUL pelo conteúdo
+        achados = achar_pdfs(args.ano, args.pdf_dir)
+        args.pdf_d1, args.pdf_d2 = achados.get(1), achados.get(2)
+        for dia, c in sorted(achados.items()):
+            print(f"  PDF do dia {dia} encontrado: {os.path.basename(c)}")
+        if not achados:
+            sys.exit(f"nenhum caderno AZUL de {args.ano} encontrado — informe "
+                     f"--pdf-d1/--pdf-d2 ou --pdf-dir")
 
+    if not args.csv:
+        auto = os.path.join(MICRO, f"microdados_enem_{args.ano}", "DADOS",
+                            f"ITENS_PROVA_{args.ano}.csv")
+        if os.path.exists(auto):
+            args.csv = auto
+            print(f"  CSV encontrado: {auto}")
     if args.csv:
         print(f"Localizando cadernos regulares AZUL de {args.ano}…")
         regulares = achar_provas_regulares(args.csv, args.deploy, args.ano)
