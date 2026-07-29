@@ -29,3 +29,8 @@ venv/
 
 # Prévia D=1 (gerada por pipeline/gera_preview_d1.py)
 deploy_d1/
+
+# Backups do rebuild (pipeline/rebuild_d1.sh) — deploy/ + pr2_deploy/ inteiros,
+# ~58 mil arquivos. Um git add -A sem isto tenta commitar tudo.
+backup-d17-*/
+rebuild-d1.log
