@@ -43,26 +43,41 @@ done
 
 # ---------------------------------------------------------------- 1. backup
 hr "1/6  Backup do que está no ar  →  $BKP/"
-# cp -al = hardlinks: instantâneo e sem gastar disco. O rebuild reescreve os
-# arquivos (novos inodes), então o backup fica intacto.
+# Copia barata e portátil. O rebuild reescreve os arquivos (inodes novos),
+# então o backup fica intacto em qualquer um dos três modos:
+#   cp -al   hardlinks — GNU/Linux, instantâneo e sem gastar disco
+#   cp -Rc   clonefile — macOS em APFS, mesmo efeito
+#   cp -R    cópia integral — fallback, gasta disco de verdade
+copia() {
+  local src=$1 dst=$2
+  rm -rf "$dst"
+  if cp -al "$src" "$dst" 2>/dev/null; then echo "hardlink"; return; fi
+  rm -rf "$dst"
+  if cp -Rc "$src" "$dst" 2>/dev/null; then echo "clone APFS"; return; fi
+  rm -rf "$dst"
+  cp -R "$src" "$dst"; echo "cópia integral"
+}
+
 mkdir -p "$BKP"
 for d in deploy pr2_deploy data; do
   [ -d "$d" ] || continue
-  cp -al "$d" "$BKP/$d"
-  echo "  $d  →  $BKP/$d  ($(du -sh --apparent-size "$d" | cut -f1))"
+  modo=$(copia "$d" "$BKP/$d")
+  echo "  $d  →  $BKP/$d  ($(du -sh "$d" | cut -f1), $modo)"
 done
 cat > "$BKP/LEIA-ME.txt" <<TXT
 Backup do painel ANTES da correção D=1, feito em $STAMP.
 Conteúdo: deploy/ (nacional), pr2_deploy/ (Paraná) e data/ (SQLites), todos
 com o p_esp calculado em D=1,7 — exatamente o que estava publicado.
 
-Para voltar o site ao ar sem refazer nada:
-    netlify deploy --prod --dir=$BKP/deploy      # nacional
-    netlify deploy --prod --dir=$BKP/pr2_deploy  # Paraná
-
-Para restaurar as pastas de trabalho:
+Para restaurar as pastas de trabalho e voltar ao estado anterior:
+    cd "$BASE"
     rm -rf deploy pr2_deploy data
-    cp -al $BKP/deploy $BKP/pr2_deploy $BKP/data .
+    cp -R $BKP/deploy $BKP/pr2_deploy $BKP/data .
+    git add -A && git commit -m "rollback para D=1,7"
+    git push        # o Cloudflare republica a partir do git
+
+Alternativa mais rápida, sem tocar no git: no painel do Cloudflare,
+Workers → o projeto → Deployments → escolher o build anterior → Rollback.
 TXT
 echo "  instruções de rollback em $BKP/LEIA-ME.txt"
 
@@ -87,10 +102,20 @@ $PY pipeline/verifica_calibracao.py pr2_deploy
 
 hr "Pronto"
 cat <<TXT
-Se a calibração acima ficou dentro de |erro| < 1 pp, publique:
+Se a calibração acima ficou dentro de |erro| < 1 pp, publique pelo git —
+o Cloudflare Workers reconstrói e serve a partir do repositório:
 
-    netlify deploy --prod --dir=deploy        # nacional
-    netlify deploy --prod --dir=pr2_deploy    # Paraná
+    cd "$BASE"
+    git add -A
+    git commit -m "Rebuild com p_esp em D=1"
+    git push
+
+    # e no repo do Paraná, se o pr2_deploy for versionado lá:
+    #   copie plataforma/pr2_deploy/ para o clone do enemparana, commit e push
+
+Se |erro| passar de 1 pp, NÃO publique — o rebuild não pegou. Confira que o
+build_db.py está sem o fator D e que os SQLites em data/ foram regravados
+agora (ls -l data/).
 
 Rollback a qualquer momento: $BKP/LEIA-ME.txt
 TXT
