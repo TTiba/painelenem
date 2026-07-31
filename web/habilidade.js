@@ -1,4 +1,4 @@
-/* Página de habilidade — card de cobertura + 4 trilhas demo ----------------- */
+/* Página de habilidade — cobertura no ENEM, questões da prova e evolução ---- */
 
 const AREA_INFO = {
   LC: { nome: "Linguagens, Códigos e suas Tecnologias", cor: "var(--lilac)" },
@@ -30,12 +30,6 @@ function nivelChaveDoFiltro() {
   return { nivel: "BR", chave: "BR" };
 }
 
-// tema curto para batizar as atividades demo (usado no hero e como sub-rótulo)
-let tema = desc.split(/[,.;]/)[0]
-  .replace(/^(Reconhecer|Identificar|Interpretar|Analisar|Avaliar|Utilizar|Relacionar|Compreender|Resolver|Associar|Comparar|Selecionar|Aplicar|Calcular)\s+/i, "")
-  .trim();
-if (tema.length > 40) tema = tema.slice(0, 40).replace(/\s+\S*$/, "") + "…";
-const temaCap = tema.charAt(0).toUpperCase() + tema.slice(1);
 const habTag = `H${h}`;
 
 const comp = window.HAB_TO_COMP?.[area]?.[h];
@@ -62,98 +56,6 @@ if (F.uf || F.mun || F.esc || F.rede !== "T") {
   if (F.rede !== "T") partes.push(REDE_NOME[F.rede]);
   alvoEl.innerHTML = `Analisando: <b>${partes.join(" · ")}</b>`;
   alvoEl.hidden = false;
-}
-
-/* ------------- 4 trilhas: conteúdo, prática, aprofundamento, recomposição -- */
-const wg = (q) => `https://wayground.com/admin/search?query=${encodeURIComponent(q)}`;
-const rco = () => `https://rco.pr.gov.br/`;
-
-const TRILHAS = {
-  "col-estruturado": {
-    plataforma: "RCO",
-    href: rco(),
-    icone: "📘",
-    itens: [
-      { nome: "Aula 1 · conceitos fundamentais",
-        meta: "3ª série EM · 2 aulas · aula expositiva" },
-      { nome: "Aula 2 · situações-problema",
-        meta: "3ª série EM · 2 aulas · resolução guiada" },
-      { nome: "Sequência didática completa",
-        meta: "3ª série EM · 4 aulas · aplicação e prática" },
-      { nome: "Aula de sistematização",
-        meta: "3ª série EM · 1 aula · fechamento" },
-    ],
-  },
-  "col-pratica": {
-    plataforma: "Wayground",
-    href: null,
-    icone: "✏️",
-    itens: [
-      { nome: "Lista dirigida",
-        meta: "10 questões · 30 min · autoavaliação",
-        tipo: "Lista de exercícios" },
-      { nome: "Quiz rápido",
-        meta: "6 questões · 10 min · gamificado",
-        tipo: "Quiz" },
-      { nome: "Prática de aplicação",
-        meta: "8 questões · 25 min · contextualizada",
-        tipo: "Ficha de atividade" },
-      { nome: "Flashcards de conceitos",
-        meta: "20 cards · revisão espaçada",
-        tipo: "Flashcards" },
-    ],
-  },
-  "col-aprofundamento": {
-    plataforma: "Wayground",
-    href: null,
-    icone: "🚀",
-    itens: [
-      { nome: `Desafio ENEM · ${habTag}`,
-        meta: "5 itens de alta dificuldade",
-        tipo: "Desafio" },
-      { nome: "Estudo de caso aplicado",
-        meta: "leitura + discussão · 1 aula",
-        tipo: "Projeto" },
-      { nome: "Simulado temático",
-        meta: "15 questões ENEM · 45 min",
-        tipo: "Simulado" },
-      { nome: "Vídeo-aula avançada",
-        meta: "20 min · perguntas embutidas",
-        tipo: "Vídeo interativo" },
-    ],
-  },
-  "col-recomposicao": {
-    plataforma: "Wayground",
-    href: null,
-    icone: "🔁",
-    itens: [
-      { nome: "Diagnóstico de lacunas",
-        meta: "8 questões · mapeia dificuldades",
-        tipo: "Avaliação diagnóstica" },
-      { nome: "Retomada guiada",
-        meta: "3 vídeos curtos + 6 questões",
-        tipo: "Aula de reforço" },
-      { nome: "Trilha de recuperação",
-        meta: "sequência progressiva · 4 níveis",
-        tipo: "Trilha adaptativa" },
-      { nome: "Sala de dúvidas",
-        meta: "vídeo-comentário + banco de exercícios",
-        tipo: "Apoio" },
-    ],
-  },
-};
-
-for (const [colId, cfg] of Object.entries(TRILHAS)) {
-  const el = document.getElementById(colId);
-  el.innerHTML = cfg.itens.map((it) => {
-    const href = cfg.href || wg(it.nome);
-    const sub = it.tipo ? `${it.tipo} · ${cfg.plataforma}` : cfg.plataforma;
-    return `<a class="link-item link-trilha" href="${href}" target="_blank">
-      <span class="li-ico">${cfg.icone}</span>
-      <span class="li-txt"><b>${it.nome}</b><small>${it.meta} · ${sub}</small></span>
-      <span class="li-seta">→</span>
-    </a>`;
-  }).join("");
 }
 
 /* -------- Cobertura no ENEM: 5 stat tiles (2021..2025) + detalhes ---------- */
@@ -273,52 +175,123 @@ fetch(`api/habilidades/${area}/${h}.json`)
   })
   .catch((e) => console.warn("cobertura não carregada:", e));
 
-/* -------- Questões desta habilidade (imagens WebP das provas oficiais) ----- */
+/* -------- Questões desta habilidade (imagens WebP das provas oficiais) -----
+ * Multi-ano: tenta api/questoes/{ano}.json pra cada ano da série. Ano sem o
+ * JSON (ou cujo caderno ainda não cobre a área — ex.: 2024 só tem o dia 1)
+ * entra na nota "sem imagens ainda", nunca em silêncio. */
+const ANOS_QUESTOES = [...ANOS_HAB].sort((a, b) => b - a);   // 2025 → 2021
 Promise.all([
   fetch(`api/habilidades/${area}/${h}.json`).then((r) => r.ok ? r.json() : null),
-  fetch(`api/questoes/2025.json`).then((r) => r.ok ? r.json() : null),
-]).then(([habData, quest]) => {
-  if (!habData || !quest || !quest.itens) return;
+  ...ANOS_QUESTOES.map((ano) =>
+    fetch(`api/questoes/${ano}.json`).then((r) => r.ok ? r.json() : null).catch(() => null)),
+]).then(([habData, ...quests]) => {
   const card = document.getElementById("hab-questoes");
   const grid = document.getElementById("hab-questoes-grid");
   const nota = document.getElementById("hab-questoes-nota");
-  if (!card || !grid) return;
+  if (!card || !grid || !nota) return;
 
-  const itens2025 = habData.por_ano?.["2025"]?.itens || [];
-  if (!itens2025.length) {
-    nota.textContent = "Nenhuma questão desta habilidade encontrada no ENEM 2025 regular.";
+  // Antes o card ficava escondido sem nenhuma mensagem quando um dos JSONs
+  // faltava — foi assim que a ausência de api/questoes/ no pr2_deploy passou
+  // batida. Agora o card sempre aparece dizendo o que houve.
+  if (!habData) {
+    nota.textContent = "Não foi possível carregar os itens desta habilidade.";
+    card.hidden = false; return;
+  }
+  const questPorAno = {};
+  ANOS_QUESTOES.forEach((ano, i) => { if (quests[i]?.itens) questPorAno[ano] = quests[i].itens; });
+  if (!Object.keys(questPorAno).length) {
+    nota.textContent = "As imagens das provas oficiais não estão disponíveis nesta versão do painel.";
     card.hidden = false; return;
   }
 
-  const cards = [];
-  for (const it of itens2025) {
-    const q = quest.itens[String(it.CO_ITEM)];
-    if (!q) continue;
-    const langLabel = q.tp_lingua === 0 ? "Inglês"
-                    : q.tp_lingua === 1 ? "Espanhol" : null;
-    const headline = `Questão ${q.co_posicao}` + (langLabel ? ` · ${langLabel}` : "");
-    const sub = `Dificuldade b = ${Number(it.param_b).toFixed(2)} · ${Math.round(it.p_br * 100)}% de acerto no Brasil`;
-    const imgs = q.imgs.map((src, i) =>
-      `<a href="${src}" target="_blank" class="hab-quest-imgwrap"
-          title="Abrir em nova aba (página ${q.pags[i]} do caderno)">
-         <img loading="lazy" src="${src}" alt="Questão ${q.co_posicao}${langLabel ? " (" + langLabel + ")" : ""}">
-       </a>`).join("");
-    cards.push(`<div class="hab-quest">
-      <div class="hab-quest-head" style="border-left-color:${info.cor}">
-        <div class="hab-quest-headline">${headline}</div>
-        <div class="hab-quest-sub">${sub}</div>
-      </div>
-      <div class="hab-quest-imgs">${imgs}</div>
-    </div>`);
+  // Um slide por questão, do ano mais recente pro mais antigo. Com recorte
+  // (região só da questão, colunas costuradas) quando o gerador produziu;
+  // senão cai pra(s) página(s) inteira(s) — caso do 2025, vindo do pipeline
+  // nacional antigo.
+  const slides = [];
+  const semImagem = [];   // anos em que a habilidade caiu mas não há imagem
+  for (const ano of ANOS_QUESTOES) {
+    const itensAno = habData.por_ano?.[String(ano)]?.itens || [];
+    if (!itensAno.length) continue;          // habilidade não caiu nesse ano
+    const qmap = questPorAno[ano];
+    let achou = false;
+    for (const it of itensAno) {
+      const q = qmap?.[String(it.CO_ITEM)];
+      if (!q) continue;
+      achou = true;
+      const langLabel = q.tp_lingua === 0 ? "Inglês"
+                      : q.tp_lingua === 1 ? "Espanhol" : null;
+      const partesSub = [];
+      if (it.param_b != null) partesSub.push(`b = ${Number(it.param_b).toFixed(2)}`);
+      if (it.p_br != null) partesSub.push(`${Math.round(it.p_br * 100)}% de acerto no Brasil`);
+      const pagLink = (q.imgs || [])[0];
+      const corpo = q.recorte
+        ? `<img loading="lazy" src="${q.recorte}" alt="ENEM ${ano} · questão ${q.co_posicao}${langLabel ? " (" + langLabel + ")" : ""}">`
+        : (q.imgs || []).map((src, i) =>
+            `<img loading="lazy" src="${src}" alt="ENEM ${ano} · questão ${q.co_posicao} · página ${q.pags[i]}">`).join("");
+      slides.push(`<div class="hc-slide">
+        <div class="hab-quest-head" style="border-left-color:${info.cor}">
+          <div class="hab-quest-headline">
+            <span class="hc-ano-chip">ENEM ${ano}</span> Questão ${q.co_posicao}${langLabel ? ` · ${langLabel}` : ""}
+          </div>
+          <div class="hab-quest-sub">${partesSub.join(" · ")}
+            ${pagLink ? ` · <a href="${pagLink}" target="_blank">ver página do caderno</a>` : ""}</div>
+        </div>
+        <div class="hc-img">${corpo}</div>
+      </div>`);
+    }
+    if (!achou) semImagem.push(ano);
   }
-  if (!cards.length) {
-    nota.textContent = "As questões estão mapeadas mas as imagens ainda não foram geradas para esta habilidade.";
-  } else {
-    grid.innerHTML = cards.join("");
-    nota.textContent = `${cards.length} ${cards.length === 1 ? "questão exibida" : "questões exibidas"} do caderno AZUL do ENEM 2025.`;
+
+  if (!slides.length) {
+    nota.textContent = semImagem.length
+      ? `As questões de ${semImagem.join(", ")} estão mapeadas, mas as imagens dessas provas ainda não foram geradas.`
+      : "Nenhuma questão desta habilidade encontrada nas provas regulares.";
+    card.hidden = false;
+    return;
   }
-  card.hidden = false;
-}).catch((e) => console.warn("questões não carregadas:", e));
+
+  grid.innerHTML = `
+    <div class="hab-carrossel">
+      <button class="hc-nav hc-prev" aria-label="Questão anterior">‹</button>
+      <div class="hc-viewport">${slides.join("")}</div>
+      <button class="hc-nav hc-next" aria-label="Próxima questão">›</button>
+    </div>
+    <div class="hc-contador"></div>`;
+
+  card.hidden = false;   // antes de medir: com o card hidden, clientWidth é 0
+
+  const vp = grid.querySelector(".hc-viewport");
+  const cont = grid.querySelector(".hc-contador");
+  const bPrev = grid.querySelector(".hc-prev");
+  const bNext = grid.querySelector(".hc-next");
+  const atual = () => vp.clientWidth ? Math.round(vp.scrollLeft / vp.clientWidth) : 0;
+  const atualizar = () => {
+    const i = atual();
+    cont.textContent = `${i + 1} / ${slides.length}`;
+    bPrev.disabled = i <= 0;
+    bNext.disabled = i >= slides.length - 1;
+  };
+  const ir = (delta) => vp.scrollBy({ left: delta * vp.clientWidth, behavior: "smooth" });
+  bPrev.addEventListener("click", () => ir(-1));
+  bNext.addEventListener("click", () => ir(1));
+  vp.addEventListener("scroll", () => requestAnimationFrame(atualizar), { passive: true });
+  atualizar();
+
+  const anosOk = ANOS_QUESTOES.filter((a) =>
+    (habData.por_ano?.[String(a)]?.itens || []).some((it) => questPorAno[a]?.[String(it.CO_ITEM)]));
+  nota.textContent = `${slides.length} ${slides.length === 1 ? "questão" : "questões"} `
+    + `do caderno AZUL (${anosOk.join(", ")}) — use as setas pra navegar.`
+    + (semImagem.length ? ` Sem imagens ainda para: ${semImagem.join(", ")}.` : "");
+}).catch((e) => {
+  console.warn("questões não carregadas:", e);
+  const card = document.getElementById("hab-questoes");
+  const nota = document.getElementById("hab-questoes-nota");
+  if (card && nota) {
+    nota.textContent = "Erro ao carregar as questões desta habilidade.";
+    card.hidden = false;
+  }
+});
 
 /* -------- Evolução do desempenho na habilidade (2021-2025) ---------------- */
 /* Séries:

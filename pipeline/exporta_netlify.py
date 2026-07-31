@@ -70,9 +70,34 @@ else:
 
 # ---------------------------------------------------------------- frontend
 log("Copiando frontend…")
+# As questões (api/questoes/*.json + questoes/{ano}/*.webp) não são produzidas
+# por este script e levam horas de PDF pra regerar. Preservamos com rename —
+# instantâneo, mesmo com ~150 MB — pra que o rmtree abaixo não as destrua.
+# Isso vale mesmo que os PDFs de origem não estejam na máquina.
+GUARDA = OUT + ".questoes_tmp"
+if os.path.exists(GUARDA):
+    shutil.rmtree(GUARDA)
+preservados = []
+for rel in ("questoes", os.path.join("api", "questoes")):
+    orig = os.path.join(OUT, rel)
+    if os.path.isdir(orig):
+        dest = os.path.join(GUARDA, rel)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        os.rename(orig, dest)
+        preservados.append(rel)
+if preservados:
+    log(f"  questões preservadas do rmtree: {', '.join(preservados)}")
+
 if os.path.exists(OUT):
     shutil.rmtree(OUT)
 shutil.copytree(WEB, OUT)
+
+for rel in preservados:
+    dest = os.path.join(OUT, rel)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    os.rename(os.path.join(GUARDA, rel), dest)
+if os.path.exists(GUARDA):
+    shutil.rmtree(GUARDA)
 for arq in os.listdir(OUT):
     if not arq.endswith(".html"):
         continue
@@ -632,21 +657,28 @@ con.close()
 if hist_con is not None:
     hist_con.close()
 
-# Rebuild das imagens das questões (as pastas questoes/ e api/questoes/ foram
-# apagadas pelo shutil.rmtree do começo — precisamos regerá-las). Se o script
-# ou dependências (pdftoppm, cwebp) estiverem ausentes, seguimos sem quebrar.
+# Questões: as pastas foram preservadas do rmtree lá em cima, então o que
+# existia continua servido. Aqui só tentamos ATUALIZAR/COMPLETAR os anos cujos
+# PDFs estiverem disponíveis (o gerador acha os cadernos AZUL pelo conteúdo na
+# pasta dos microdados). Falha em qualquer ano é aviso, nunca quebra o export —
+# e nunca apaga o que já estava lá.
+ANOS_QUESTOES = (2021, 2022, 2023, 2024, 2025)
 try:
-    script = os.path.join(BASE, "pipeline", "build_questoes_img.py")
+    script = os.path.join(BASE, "pipeline", "build_questoes_ano.py")
     if os.path.exists(script):
-        log("Regerando imagens das questões (build_questoes_img.py)…")
-        r = subprocess.run([sys.executable, script, "--ano", "2025"],
-                           capture_output=True, text=True, cwd=BASE)
-        if r.returncode == 0:
-            log("  imagens ok")
-        else:
-            log(f"  (aviso) falha ao gerar imagens: {r.stderr.strip()[:200]}")
+        log("Atualizando questões dos anos com PDF disponível…")
+        for ano in ANOS_QUESTOES:
+            r = subprocess.run([sys.executable, script, "--ano", str(ano),
+                                "--deploy", OUT],
+                               capture_output=True, text=True, cwd=BASE)
+            if r.returncode == 0:
+                ultima = [l for l in r.stdout.strip().splitlines() if l.startswith("✓")]
+                log(f"  {ano}: {ultima[-1] if ultima else 'ok'}")
+            else:
+                log(f"  {ano}: sem PDF/CSV — mantendo o que já havia "
+                    f"({r.stderr.strip().splitlines()[-1][:90] if r.stderr.strip() else 'sem detalhe'})")
 except Exception as e:
-    log(f"  (aviso) skip questoes img: {e}")
+    log(f"  (aviso) skip questões: {e}")
 
 total, n_arq = 0, 0
 for raiz, _, arquivos in os.walk(OUT):

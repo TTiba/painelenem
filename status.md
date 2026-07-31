@@ -5,6 +5,82 @@
 > isto antes de mexer em qualquer coisa. Última atualização: 2026-07-21,
 > com a expansão para série histórica 2021–2025 e página de habilidades.
 
+## Auditoria da TRI: o Δ esperado usava D=1,7 e estava inflado (2026-07-27)
+
+O `p_esp` (esperado pela TRI) era calculado em `build_db.py` com a 3PL
+multiplicando o expoente pela constante **D = 1,7**. Esse fator é uma
+*conversão de métrica* entre a ogiva normal e a logística — só se aplica a
+parâmetros estimados na métrica normal. Os `NU_PARAM_A` publicados pelo INEP
+já vêm na métrica logística, então o fator sobrava e entortava a curva.
+
+**Teste decisivo**: as notas TRI foram calculadas pelo próprio INEP a partir
+dessas mesmas respostas e desses mesmos parâmetros, então a probabilidade
+média prevista *tem* que reproduzir o acerto observado. Medido com
+`pipeline/verifica_calibracao.py` no `deploy/` gerado com D=1,7:
+
+| nível | exposições | erro do modelo |
+|---|---|---|
+| BR · pública | 184.808.673 | **−2,59 pp** |
+| BR · todas as redes | 228.695.283 | −1,85 pp |
+| 27 UFs · pública | — | −2,71 pp (mediana −2,78 · **dp 0,31**) |
+| 5.131 municípios · pública | — | −2,88 pp |
+
+O desvio-padrão de 0,31 pp entre as 27 UFs mostra que o viés é sistemático e
+uniforme, não ruído. Auditoria original feita no painel PR contra uma planilha
+reconstruída direto dos microdados (escola Regente Feijó): com **D=1** o erro
+cai para **+0,09 pp** na rede pública do PR (50.328 alunos), e três populações
+independentes de 200 a 50 mil alunos convergem em D ótimo entre 0,97 e 1,02.
+
+**Efeito na UI**: a coluna "Δ esperado" ficava inflada ~2,5 a 3 pp, escondendo
+déficits reais. Como o viés **cresce quanto mais fraca a população**, ele
+também distorcia a comparação entre escolas — o oposto do que um painel de
+priorização precisa.
+
+**Correção aplicada** em `build_db.py` (o fator 1.7 saiu do expoente).
+⚠ **O `deploy/` versionado ainda tem os JSONs antigos** — precisa de
+`build_all_years.py` + `exporta_netlify.py` pra refletir a correção. Depois do
+rebuild, `python3 pipeline/verifica_calibracao.py deploy` deve dizer
+`✓ CALIBRADO`.
+
+**Ressalva conhecida**: o 3PL superestima a **rede privada** em ~+1,9 pp sob
+qualquer valor de D (o D ótimo dela estoura 2,5, o que não faz sentido). Isso
+se sustenta com 14.452 alunos só no PR, então não é ruído amostral — é
+desajuste de modelo, consistente com a ausência de parâmetro de descuido (o
+3PL não tem assíntota superior menor que 1, e o efeito cresce com θ). A
+correção do D não piora nem resolve isso.
+
+## Melhorias replicadas do Painel PR v2 (2026-07-27)
+
+Tudo o que foi desenvolvido no repo `enemparana` e se aplica ao nacional:
+
+- **Questões das habilidades: 5 anos com recorte individual.** Novo
+  `pipeline/build_questoes_ano.py` gera `api/questoes/{ano}.json` + as imagens
+  a partir do `ITENS_PROVA_{ano}.csv` e dos PDFs oficiais dos cadernos AZUL.
+  Além das páginas inteiras, produz o **recorte de cada questão** (colunas
+  costuradas, texto-base "QUESTÕES N A M" incluído). Resultado: **925 recortes,
+  2021-2025, 185 itens/ano**. Acha os cadernos regulares sozinho cruzando os
+  CO_ITEM com `api/habilidades/` e desambigua duplicatas (2021/2022 têm um
+  segundo conjunto azul digital/reaplicação). Antes existia só 2025 em páginas.
+- **Carrossel na página de habilidade** — um slide por questão, ano mais
+  recente primeiro, chip do ano, setas com contador, scroll-snap. Usa o
+  recorte quando existe e cai pra página inteira quando não.
+- **`habilidade.js` não falha mais em silêncio**: o card de questões sempre
+  aparece, com nota dizendo quais anos estão mapeados e quais ainda não têm
+  imagem; rótulos de `b`/`% BR` não imprimem `NaN` quando vêm nulos.
+- **Trilhas pedagógicas demo removidas** (4 colunas de conteúdo simulado
+  RCO/Wayground) de `habilidade.html`, `habilidade.js` e o CSS órfão.
+- **Tooltip próprio** (`web/tooltip.js`) substituindo o `title` nativo, que
+  tinha ~1s de atraso e sumia ao mover o mouse. Bolha imediata em
+  `position:fixed` no `<body>` — o `.tbl-scroll` tem `overflow:auto` e
+  recortaria um `::after`. Mantém `aria-label` e funciona no foco por teclado.
+- **Painel abre no estado inicial**: `filtros.js` ignora o `localStorage`
+  quando o `index.html` (ou `/`) é aberto sem nenhum parâmetro na URL. As
+  outras páginas seguem lendo dele — é o que carrega o contexto entre elas.
+  A rede não é resetada (preferência de exibição).
+- **Denominador próprio em cada média das competências** (`app.js`):
+  `p_esp`/`p_br` nulos eram somados como zero sobre o `n` total, afundando a
+  barra da competência. Agora `nP`/`nEsp`/`nBr`.
+
 ## O que é isto
 
 Plataforma web de análise de desempenho no ENEM 2021–2025, navegável por
